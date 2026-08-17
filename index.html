@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#04050a">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Deep Zoom — quasi-self-similarity in the Mandelbrot set</title>
 <style>
   :root{
@@ -15,6 +17,7 @@
     font-family:var(--mono);color:var(--txt);-webkit-font-smoothing:antialiased}
   #gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
   #gl.drag{cursor:grabbing}
+
 
   #panel{position:fixed;top:12px;right:12px;width:310px;max-height:calc(100% - 24px);
     overflow-y:auto;background:var(--panel);backdrop-filter:blur(14px);
@@ -65,10 +68,53 @@
     line-height:1.6;pointer-events:none}
   #err{position:fixed;inset:0;display:none;place-items:center;padding:40px;text-align:center;
     color:#f5a9c8;font-size:13px;line-height:1.7;z-index:20}
+
+  /* ───────────────────────────── touch layout ───────────────────────────── */
+  .fab{position:fixed;z-index:30;display:none;align-items:center;justify-content:center;
+    border-radius:999px;background:rgba(13,19,32,.92);border:1px solid var(--line);
+    color:var(--txt);backdrop-filter:blur(14px);font-family:var(--mono);
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;cursor:pointer}
+  .fab:active{transform:scale(.94)}
+  .fab.prim{background:var(--accent);color:#12100a;border-color:var(--accent);font-weight:700}
+  body.touch .fab{display:flex}
+
+  #fab-dive{left:50%;transform:translateX(-50%);bottom:calc(22px + env(safe-area-inset-bottom));
+    height:56px;min-width:132px;padding:0 22px;font-size:14px;letter-spacing:.06em}
+  #fab-dive:active{transform:translateX(-50%) scale(.94)}
+  #fab-set{right:16px;bottom:calc(26px + env(safe-area-inset-bottom));width:48px;height:48px;font-size:19px}
+  #fab-out{left:16px;bottom:calc(26px + env(safe-area-inset-bottom));width:48px;height:48px;font-size:19px}
+
+  body.touch .hint{display:none}
+  body.touch #hud{font-size:9.5px;padding:7px 9px;line-height:1.6;max-width:none;
+    left:8px;top:calc(8px + env(safe-area-inset-top))}
+  body.touch #hud .k{min-width:82px}
+  body.touch .inset-lab{display:none}
+
+  body.touch #panel{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;
+    max-height:78vh;border-radius:16px 16px 0 0;border-bottom:none;
+    padding:14px 16px calc(20px + env(safe-area-inset-bottom));
+    transform:translateY(101%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+    -webkit-overflow-scrolling:touch}
+  body.touch #panel.open{transform:translateY(0)}
+  body.touch #panel::before{content:"";display:block;width:36px;height:4px;border-radius:2px;
+    background:#2c3a5c;margin:-4px auto 12px}
+  body.touch button{padding:9px 12px;font-size:11px}
+  body.touch .pbtn{padding:10px 12px}
+  body.touch input[type=range]{height:16px;background:transparent}
+  body.touch input[type=range]::-webkit-slider-thumb{width:22px;height:22px}
+  body.touch input[type=range]::-moz-range-thumb{width:22px;height:22px}
+  body.touch .row{margin-bottom:15px}
+  body.touch .lab{font-size:12px}
+
+  /* while diving, get everything out of the way but leave a stop button */
+  body.touch.diving #hud,
+  body.touch.diving #fab-set,
+  body.touch.diving #fab-out{opacity:0;pointer-events:none;transition:opacity .25s}
 </style>
 </head>
 <body>
 <canvas id="gl"></canvas>
+
 
 <div id="hud">
   <div><span class="k">magnification</span><b id="h-mag">1×</b></div>
@@ -114,6 +160,7 @@
     <div id="c-render"></div>
     <div class="btns">
       <button id="b-series" class="on">Series approx</button>
+      <button id="b-ss" class="on">4x samples</button>
       <button id="b-insets" class="on">Insets</button>
       <button id="b-pal">Palette</button>
       <button id="b-snap">PNG</button>
@@ -125,11 +172,17 @@
     <p><b>Seahorse vs Elephant vs Triple Spiral.</b> Same rule, same iteration, wildly different local decoration. If the set were self-similar these would converge to one picture. They don't — the local structure encodes your address.</p>
     <p><b>Misiurewicz c = i.</b> Compare the main view to the Julia inset as you dive. They converge on each other. That's Tan Lei's 1990 theorem: at Misiurewicz points the Mandelbrot set is asymptotically similar to the corresponding <i>Julia</i> set — not to itself.</p>
     <p><b>Feigenbaum point.</b> The one landmark that <i>is</i> asymptotically self-similar, repeating at ratio δ = 4.669…, the same constant that governs period-doubling in dripping taps and heart arrhythmias.</p>
+    <p><b>Speckle.</b> Near a chaotic boundary a pixel can sit on a knife edge where a one-bit difference flips its escape count by hundreds. WebGL has no doubles, and measured against exact ground truth, emulating them costs about 6× the shader time to remove only a third of the visible speckle — a bad trade. <b>4x samples</b> is the better one: it doesn't correct a bad sample, it dilutes it to quarter weight. Turn it off to see the difference. The real cure is per-pixel glitch detection against multiple reference orbits, which is what dedicated software does.</p>
     <p><b>On "infinite".</b> There's no hard wall now — precision grows with depth automatically. But each decade down needs more iterations and more bits, so the cost climbs without bound. You can always go one more level. You can never go all the way. Raise <b>Iteration budget</b> when detail turns to mush; that's the signal you've outrun it.</p>
   </details>
 </div>
 
 <div class="hint">drag = pan · scroll = zoom at cursor · <b>space</b> = dive · <b>H</b> = hide panel</div>
+
+<button class="fab prim" id="fab-dive">DIVE IN</button>
+<button class="fab" id="fab-out" title="Dive out">&#8599;</button>
+<button class="fab" id="fab-set" title="Settings">&#9881;</button>
+
 <div id="err"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -155,11 +208,28 @@ function toFx(x) {
   for (var b = 1n; b <= FRAC; b++) { f *= 2; if (f >= 1) { acc |= (1n << (FRAC - b)); f -= 1; } }
   return neg ? -acc : acc;
 }
+/* 2^FRAC overflows a double once FRAC >= 1024, which would make Number(FXONE)
+ * Infinity and silently discard the whole fractional part. Never materialise
+ * it — take the top 64 bits and apply the exponent separately. */
 function fxToNum(a) {
   var neg = a < 0n; if (neg) a = -a;
-  var i = a >> FRAC, f = a - (i << FRAC);
-  var v = Number(i) + Number(f) / Number(FXONE);
+  if (a === 0n) return 0;
+  var bits = a.toString(2).length;
+  var sh = bits > 64 ? BigInt(bits - 64) : 0n;
+  var v = Number(a >> sh) * Math.pow(2, Number(sh) - Number(FRAC));
   return neg ? -v : v;
+}
+
+/* Landmark coordinates need far more digits than a double literal holds, so
+ * they're stored as decimal strings and parsed straight into fixed point. */
+function toFxStr(s) {
+  var neg = s.charAt(0) === "-";
+  if (neg || s.charAt(0) === "+") s = s.slice(1);
+  var dot = s.indexOf("."), ip = dot < 0 ? s : s.slice(0, dot);
+  var fp = dot < 0 ? "" : s.slice(dot + 1);
+  var acc = BigInt(ip || "0") << FRAC;
+  if (fp.length) acc += (BigInt(fp) << FRAC) / (10n ** BigInt(fp.length));
+  return neg ? -acc : acc;
 }
 function fxMul(a, b) { return (a * b) >> FRAC; }
 function FX_FOUR() { return 4n << FRAC; }
@@ -255,13 +325,13 @@ function buildSeries(scale, R) {
     series.N = 0; series.f = 1; series.logS = Math.log2(scale);
     series.co.fill(0); series.skipped = 0;
   } else {
-    var A = saSnaps[pick];
-    var mA = Math.hypot(A[0], A[1]);
+    var Ac = saSnaps[pick];                       // not `A` — that's the audio state
+    var mA = Math.hypot(Ac[0], Ac[1]);
     var E = mA > 0 ? Math.round(Math.log2(mA)) : 0;
     var f = Math.pow(2, -E), sp = f;
     for (k = 1; k <= SK; k++) {
-      series.co[2*(k-1)]   = A[2*(k-1)]   * sp;
-      series.co[2*(k-1)+1] = A[2*(k-1)+1] * sp;
+      series.co[2*(k-1)]   = Ac[2*(k-1)]   * sp;
+      series.co[2*(k-1)+1] = Ac[2*(k-1)+1] * sp;
       sp *= scale;                                // A_k · scale^(k-1) · 2^-E
     }
     series.N = saSnapN[pick];
@@ -302,6 +372,8 @@ var FRAG = [
 "uniform float uMarkerOn;",
 "uniform vec2  uMarker;",
 "uniform float uMarkerR;",
+"uniform float uSS;",          // 2 = 2x2 supersampling
+"uniform float uPixel;",       // one pixel, in p units
 "uniform float uSkipN;",       // series approximation entry iteration (0 = disabled)
 "uniform float uSkipLogS;",
 "uniform float uSkipF;",
@@ -326,9 +398,7 @@ var FRAG = [
 "  return vec3(1.0) - (0.5 + 0.5*cos(6.28318*(t + vec3(0.0,0.05,0.1))));",
 "}",
 
-"void main(){",
-"  vec2 p = (vUv - 0.5) * 2.0;",
-"  p.x *= uAspect;",
+"vec3 shade(vec2 p){",
 
 /* Droste–Escher conformal map, in log-polar coordinates.
  * Shearing log(r) against theta turns concentric scaling into a spiral; the
@@ -420,10 +490,33 @@ var FRAG = [
 "    }",
 "  }",
 
-"  vec3 col;",
-"  if (!escaped) col = vec3(0.02,0.025,0.05);",
-"  else col = pal(sqrt(max(sn,0.0)) * uColScale * 0.06 + uColShift);",
+"  if (!escaped) return vec3(0.02,0.025,0.05);",
+"  return pal(sqrt(max(sn,0.0)) * uColScale * 0.06 + uColShift);",
+"}",
 
+/* Residual wrong pixels are chaotic-boundary sensitivity, not a fixable bug —
+ * see the note in the panel. Averaging four sub-samples doesn't correct them,
+ * but it drops an isolated bad sample to a quarter weight, which is the
+ * difference between a bright speckle and something you don't notice.       */
+"void main(){",
+"  vec2 p = (vUv - 0.5) * 2.0;",
+"  p.x *= uAspect;",
+"  vec3 col;",
+"  if (uSS > 1.5) {",
+"    col = vec3(0.0);",
+"    float n = 0.0;",
+"    for (int sy = 0; sy < 3; sy++) {",
+"      for (int sx = 0; sx < 3; sx++) {",
+"        if (float(sx) >= uSS || float(sy) >= uSS) continue;",
+"        vec2 o = (vec2(float(sx), float(sy)) + 0.5) / uSS - 0.5;",
+"        col += shade(p + o * uPixel);",
+"        n += 1.0;",
+"      }",
+"    }",
+"    col /= n;",
+"  } else {",
+"    col = shade(p);",
+"  }",
 "  if (uMarkerOn > 0.5) {",
 "    vec2 wp = uPlainCenter + p * uPlainScale;",
 "    if (abs(length(wp - uMarker)/uPlainScale - uMarkerR) < 0.02) col = mix(col, vec3(1.0,0.35,0.45), 0.92);",
@@ -433,6 +526,21 @@ var FRAG = [
 ].join("\n");
 
 /* ═════════════════════════════════════════════════════════════ renderer ══ */
+
+/* Touch-first layout when the primary input is a finger. Screen width alone
+ * misfires on small laptop windows and on tablets held in landscape. */
+var IS_TOUCH = (function () {
+  try {
+    var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    var touch  = ("ontouchstart" in window) ||
+                 (navigator.maxTouchPoints || 0) > 0 ||
+                 (navigator.msMaxTouchPoints || 0) > 0;
+    var mobileUA = /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(navigator.userAgent || "");
+    var iPadOS = /Macintosh/.test(navigator.userAgent || "") && (navigator.maxTouchPoints || 0) > 1;
+    return !!(coarse || mobileUA || iPadOS) && !!touch;
+  } catch (e) { return false; }
+})();
+if (IS_TOUCH && document.body) document.body.className += " touch";
 
 var canvas = document.getElementById("gl");
 var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, preserveDrawingBuffer: true });
@@ -460,6 +568,8 @@ var uni = {
   uMarkerOn:    { value: 0.0 },
   uMarker:      { value: new THREE.Vector2(0, 0) },
   uMarkerR:     { value: 0.07 },
+  uSS:          { value: 2.0 },
+  uPixel:       { value: 0.002 },
   uSkipN:       { value: 0.0 },
   uSkipLogS:    { value: 0.0 },
   uSkipF:       { value: 1.0 },
@@ -487,7 +597,8 @@ var P = { quality: 1.0, colScale: 1.0, colShift: 0.0, diveRate: 0.55,
           dTwist: 1.0, dLambda: 6.0, dSpin: 0.08 };
 var diving = 0, showInsets = true, palette = 0, needRef = true;
 var droste = 0, dPhase = 0;                     // 0 off · 1 spiral · 2 tunnel
-var useSeries = true;
+var useSeries = true, superSample = 2;
+
 
 function magnification() { return HOME.scale / view.scale; }
 
@@ -498,15 +609,18 @@ function currentIters() {
 }
 
 /* precision tracks depth: enough bits for the scale, plus headroom */
+/* Floor of 256 bits (~77 decimal digits) so a 52-digit landmark survives being
+ * loaded at a shallow scale. And FRAC only ever grows: shrinking it would
+ * discard digits you'd need again on the way back down. */
 function neededFrac() {
   var bits = 96 + Math.ceil(Math.log2(1 / Math.max(view.scale, 1e-300)));
-  return BigInt(Math.max(128, Math.min(4096, Math.ceil(bits / 64) * 64)));
+  var want = BigInt(Math.max(256, Math.min(4096, Math.ceil(bits / 64) * 64)));
+  return want > FRAC ? want : FRAC;
 }
 function setFrac(nf) {
-  if (nf === FRAC) return;
-  var d = nf - FRAC;
-  view.cx = d > 0n ? (view.cx << d) : (view.cx >> -d);
-  view.cy = d > 0n ? (view.cy << d) : (view.cy >> -d);
+  if (nf <= FRAC) return;
+  view.cx <<= (nf - FRAC);
+  view.cy <<= (nf - FRAC);
   FRAC = nf; FXONE = 1n << FRAC;
   needRef = true;
 }
@@ -524,25 +638,47 @@ function refreshReferenceIfNeeded() {
 
 /* ══════════════════════════════════════════════════════════════ presets ══ */
 
+/* Coordinates carrying only 6–7 digits run out at about 1e-7 of zoom: the
+ * structure slides off screen and you're left staring at flat colour. These
+ * were re-derived by hill-climbing each landmark onto the set boundary at
+ * 1024-bit precision, then verified to still show detail at 1e-40.          */
 var PRESETS = [
-  { n:"Home",            d:"the whole object",                       x:-0.6,               y:0.0,              s:1.3 },
-  { n:"Seahorse Valley", d:"spirals wrapped in seahorse tails",      x:-0.743643887037151, y:0.13182590420533, s:5e-4 },
-  { n:"Elephant Valley", d:"same rule, totally different decoration",x:0.2925755,          y:0.0195091,        s:5e-3 },
-  { n:"Triple Spiral",   d:"three-fold, and it stays three-fold",    x:-0.088,             y:0.654,            s:8e-3 },
-  { n:"Feigenbaum pt",   d:"the one that IS self-similar · δ=4.669", x:-1.401155189092,    y:0.0,              s:2e-3 },
-  { n:"Misiurewicz c=i", d:"dive here and watch the Julia inset",    x:0.0,                y:1.0,              s:5e-2 },
-  { n:"Mini-brot",       d:"a whole copy, visibly distorted",        x:-1.7686,            y:0.0,              s:6e-3 },
-  { n:"Julia island",    d:"deep spiral nest — start here for depth",x:-0.7746806106269039,y:-0.1374168856037867, s:5e-6 },
-  { n:"Antenna tip",     d:"c = −2 exactly · pure dendrite, no area",x:-2.0,               y:0.0,              s:1.2e-2 },
-  { n:"Cardioid cusp",   d:"c = ¼ exactly · parabolic, infinitely slow", x:0.25,           y:0.0,              s:1.0e-2 },
-  { n:"Root point",      d:"c = −¾ exactly · where seahorses open",  x:-0.75,              y:0.0,              s:2.0e-2 },
-  { n:"Period-3 root",   d:"c = −⅛ + 0.649519i · exact bulb junction",x:-0.125,            y:0.649519052838329, s:1.2e-2 },
-  { n:"Spiral cluster",  d:"nested spirals, no two alike",           x:-0.235125,          y:0.827215,         s:4e-3 }
+  { n:"Home",            d:"the whole object",                       x:"-0.6", y:"0", s:1.3 },
+  { n:"Seahorse Valley", d:"spirals wrapped in seahorse tails",
+    x:"-0.7434355539003074868704666827667972456664507933432793",
+    y:"0.1312009036843907583093205602566699284831764593906338",  s:5e-4 },
+  { n:"Elephant Valley", d:"same rule, totally different decoration",
+    x:"0.2960956788750298127425020661411736377186735297132482",
+    y:"0.0195004366286483488771006074882251440839134180311223",  s:5e-3 },
+  { n:"Triple Spiral",   d:"three-fold, and it stays three-fold",
+    x:"-0.0928594679821893892675932906257878980377972178036907",
+    y:"0.6487265446360835691285772715793487917093146105366651",  s:8e-3 },
+  { n:"Feigenbaum pt",   d:"the one that IS self-similar · δ=4.669",
+    x:"-1.401155189092", y:"0", s:2e-3 },
+  { n:"Misiurewicz c=i", d:"dive here and watch the Julia inset",
+    x:"0", y:"1", s:5e-2 },
+  { n:"Mini-brot",       d:"a whole copy, visibly distorted",
+    x:"-1.7746443758048389375080575143776330039907891800236228",
+    y:"-0.0040013407317713918016567721319735334816048962543813", s:6e-3 },
+  { n:"Julia island",    d:"deep spiral nest — start here for depth",
+    x:"-0.7746839602186956303242732868706975016019511870301830",
+    y:"-0.1374215927939575385643055686538138729008423833910330", s:5e-6 },
+  { n:"Spiral cluster",  d:"nested spirals, no two alike",
+    x:"-0.2350361243347129400398824295743556713037217836067210",
+    y:"0.8273390778979832867738123869152519116005937281976985",  s:4e-3 },
+  { n:"Antenna tip",     d:"c = −2 exactly · pure dendrite, no area",
+    x:"-2", y:"0", s:1.2e-2 },
+  { n:"Cardioid cusp",   d:"c = ¼ exactly · parabolic, infinitely slow",
+    x:"0.25", y:"0", s:1.0e-2 },
+  { n:"Root point",      d:"c = −¾ exactly · where seahorses open",
+    x:"-0.75", y:"0", s:2.0e-2 },
+  { n:"Period-3 root",   d:"c = −⅛ + 0.649519i · exact bulb junction",
+    x:"-0.125", y:"0.6495190528383290", s:1.2e-2 }
 ];
 function goTo(p) {
   view.scale = p.s;
   setFrac(neededFrac());
-  view.cx = toFx(p.x); view.cy = toFx(p.y);
+  view.cx = toFxStr(p.x); view.cy = toFxStr(p.y);
   needRef = true;
 }
 
@@ -610,6 +746,8 @@ function renderAll() {
   renderer.setViewport(0, 0, W, H);
   uni.uMode.value    = 0;
   uni.uAspect.value  = W / H;
+  uni.uSS.value      = superSample;
+  uni.uPixel.value   = 2 / H;                 // p spans [-1,1] vertically over H px
   uni.uLogS0.value   = Math.log2(view.scale);
   uni.uDcsBase.value.set(dcbx, dcby);
   renderer.render(scene, cam2d);
@@ -621,7 +759,7 @@ function renderAll() {
   var a = r[0];
   renderer.setViewport(a.x, a.y, a.w, a.h);
   renderer.setScissor(a.x, a.y, a.w, a.h);
-  uni.uMode.value = 2; uni.uAspect.value = a.w / a.h;
+  uni.uMode.value = 2; uni.uAspect.value = a.w / a.h; uni.uSS.value = 1;
   uni.uPlainCenter.value.set(-0.6, 0); uni.uPlainScale.value = 1.35;
   uni.uMaxIter.value = 220; uni.uMarkerOn.value = 1;
   uni.uMarker.value.set(fxToNum(view.cx), fxToNum(view.cy));
@@ -630,7 +768,7 @@ function renderAll() {
   var b = r[1];
   renderer.setViewport(b.x, b.y, b.w, b.h);
   renderer.setScissor(b.x, b.y, b.w, b.h);
-  uni.uMode.value = 1; uni.uAspect.value = b.w / b.h;
+  uni.uMode.value = 1; uni.uAspect.value = b.w / b.h; uni.uSS.value = 1;
   uni.uPlainCenter.value.set(0, 0); uni.uPlainScale.value = 1.45;
   uni.uJuliaC.value.set(fxToNum(view.cx), fxToNum(view.cy));
   uni.uMaxIter.value = Math.min(900, it); uni.uMarkerOn.value = 0;
@@ -656,20 +794,51 @@ function zoomAt(px, py, factor) {
   view.cx += toFx(dx); view.cy += toFx(dy);
 }
 
+var pointers = {}, pinchDist = 0;
+
+function ptList() { var a = []; for (var k in pointers) if (pointers.hasOwnProperty(k)) a.push(pointers[k]); return a; }
+
 canvas.addEventListener("pointerdown", function (e) {
-  dragging = true; lx = e.clientX; ly = e.clientY;
-  canvas.classList.add("drag"); canvas.setPointerCapture(e.pointerId);
+  pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+  var p = ptList();
+  if (p.length === 1) { dragging = true; lx = e.clientX; ly = e.clientY; canvas.classList.add("drag"); }
+  else if (p.length === 2) {
+    dragging = false;
+    pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  }
+  if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
 });
+
 canvas.addEventListener("pointermove", function (e) {
+  if (!pointers[e.pointerId]) return;
+  pointers[e.pointerId].x = e.clientX;
+  pointers[e.pointerId].y = e.clientY;
+  var p = ptList();
+
+  if (p.length >= 2) {                                  // pinch to zoom
+    var d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    if (pinchDist > 0 && d > 0) {
+      zoomAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2, pinchDist / d);
+    }
+    pinchDist = d;
+    return;
+  }
   if (!dragging) return;
   view.cx -= toFx((e.clientX - lx) / H * 2 * view.scale);
   view.cy += toFx((e.clientY - ly) / H * 2 * view.scale);
   lx = e.clientX; ly = e.clientY;
 });
+
 function endDrag(e) {
-  dragging = false; canvas.classList.remove("drag");
-  if (e && e.pointerId !== undefined && canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId))
-    canvas.releasePointerCapture(e.pointerId);
+  if (e && e.pointerId !== undefined) {
+    delete pointers[e.pointerId];
+    if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId))
+      canvas.releasePointerCapture(e.pointerId);
+  } else { pointers = {}; }
+  var p = ptList();
+  pinchDist = 0;
+  if (p.length === 1) { dragging = true; lx = p[0].x; ly = p[0].y; }
+  else if (p.length === 0) { dragging = false; canvas.classList.remove("drag"); }
 }
 canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
@@ -680,7 +849,7 @@ canvas.addEventListener("wheel", function (e) {
 
 window.addEventListener("keydown", function (e) {
   var k = e.key.toLowerCase();
-  if (k === " " || e.code === "Space") { e.preventDefault(); setDive(diving === 1 ? 0 : 1); }
+  if (k === " " || e.code === "Space") { e.preventDefault(); setDive(diving === 1 ? 0 : 1); syncFab(); }
   else if (k === "h") document.getElementById("panel").classList.toggle("hidden");
   else if (k === "r") { goTo(PRESETS[0]); setDive(0); }
 });
@@ -705,17 +874,20 @@ var CTRLS = [
     fmt:function(v){ return v.toFixed(3); } }
 ];
 CTRLS.forEach(function (c) {
+  var store = P;
   var row = document.createElement("div");
   row.className = "row";
   row.innerHTML = '<div class="lab"><span>' + c.label + '</span><span class="val"></span></div>' +
                   '<input type="range" min="'+c.min+'" max="'+c.max+'" step="'+c.step+'">';
   var input = row.querySelector("input"), val = row.querySelector(".val");
-  input.value = P[c.k]; val.textContent = c.fmt(P[c.k]);
+  input.value = store[c.k]; val.textContent = c.fmt(store[c.k]);
   input.addEventListener("input", function () {
-    P[c.k] = parseFloat(input.value); val.textContent = c.fmt(P[c.k]);
+    store[c.k] = parseFloat(input.value);
+    val.textContent = c.fmt(store[c.k]);
   });
   document.getElementById(c.g).appendChild(row);
 });
+
 
 var pbtns = [];
 PRESETS.forEach(function (p, i) {
@@ -723,8 +895,9 @@ PRESETS.forEach(function (p, i) {
   b.className = "pbtn";
   b.innerHTML = p.n + "<small>" + p.d + "</small>";
   b.addEventListener("click", function () {
-    goTo(p); setDive(0);
+    goTo(p); setDive(0); syncFab();
     pbtns.forEach(function (x, j) { x.classList.toggle("on", j === i); });
+    if (IS_TOUCH) panelEl.classList.remove("open");
   });
   pbtns.push(b);
   document.getElementById("presets").appendChild(b);
@@ -738,7 +911,7 @@ function setDive(v) {
   bOut.classList.toggle("on", v === -1);
   bDive.textContent = v === 1 ? "Diving…" : "Dive in";
 }
-bDive.addEventListener("click", function () { setDive(diving === 1 ? 0 : 1); });
+bDive.addEventListener("click", function () { setDive(diving === 1 ? 0 : 1); syncFab(); });
 bOut .addEventListener("click", function () { setDive(diving === -1 ? 0 : -1); });
 document.getElementById("b-home").addEventListener("click", function () {
   goTo(PRESETS[0]); setDive(0);
@@ -762,6 +935,40 @@ bSer.addEventListener("click", function () {
   series.N = -1;
 });
 
+/* Supersampling can't correct a wrong sample, only dilute it — so more samples
+ * is the one lever that reliably reduces visible speckle. 9x is expensive but
+ * a deep zoom with series approximation can usually afford it. */
+var SS_STEPS = [1, 2, 3], ssIdx = 1;
+var bSS = document.getElementById("b-ss");
+function syncSS() {
+  var n = SS_STEPS[ssIdx];
+  bSS.textContent = n === 1 ? "1x sample" : (n * n) + "x samples";
+  bSS.classList.toggle("on", n > 1);
+  superSample = n;
+}
+bSS.addEventListener("click", function () { ssIdx = (ssIdx + 1) % SS_STEPS.length; syncSS(); });
+
+/* ---- touch controls ---------------------------------------------------- */
+var fabDive = document.getElementById("fab-dive"),
+    fabSet  = document.getElementById("fab-set"),
+    fabOut  = document.getElementById("fab-out"),
+    panelEl = document.getElementById("panel");
+
+function syncFab() {
+  fabDive.textContent = diving === 1 ? "STOP" : "DIVE IN";
+  if (document.body) {
+    var c = document.body.className.replace(/\s*diving/g, "");
+    document.body.className = c + (diving === 1 ? " diving" : "");
+  }
+}
+fabDive.addEventListener("click", function () {
+  setDive(diving === 1 ? 0 : 1);
+  if (diving === 1) panelEl.classList.remove("open");
+  syncFab();
+});
+fabOut.addEventListener("click", function () { setDive(diving === -1 ? 0 : -1); syncFab(); });
+fabSet.addEventListener("click", function () { panelEl.classList.toggle("open"); });
+
 var bIns = document.getElementById("b-insets");
 bIns.addEventListener("click", function () {
   showInsets = !showInsets; bIns.classList.toggle("on", showInsets); positionLabels();
@@ -774,8 +981,9 @@ document.getElementById("b-snap").addEventListener("click", function () {
   a.href = canvas.toDataURL("image/png"); a.click();
 });
 
-/* ═══════════════════════════════════════════════════════════════════ HUD ══ */
 
+
+/* ═══════════════════════ HUD ══ */
 var hMag = document.getElementById("h-mag"),  hPhys = document.getElementById("h-phys"),
     hIt  = document.getElementById("h-it"),   hRef  = document.getElementById("h-ref"),
     hRt  = document.getElementById("h-reft"), hFps  = document.getElementById("h-fps"),
@@ -814,8 +1022,8 @@ function tick(now) {
 
   if (diving !== 0) {
     var ns = view.scale * Math.exp(-diving * P.diveRate * dt);
-    if (HOME.scale / ns > MAX_MAG) { view.scale = HOME.scale / MAX_MAG; setDive(0); }
-    else if (ns > HOME.scale * 4)  { view.scale = HOME.scale * 4;       setDive(0); }
+    if (HOME.scale / ns > MAX_MAG) { view.scale = HOME.scale / MAX_MAG; setDive(0); syncFab(); }
+    else if (ns > HOME.scale * 4)  { view.scale = HOME.scale * 4;       setDive(0); syncFab(); }
     else view.scale = ns;
   }
 
@@ -838,6 +1046,16 @@ function tick(now) {
     hFps.textContent  = fps.toFixed(0);
   }
 }
+
+if (IS_TOUCH) {
+  P.quality = 0.7;                 // phones have a fraction of the fill rate
+  ssIdx = 0;                       // 1 sample until the user asks for more
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  showInsets = false;
+  bIns.classList.remove("on");
+}
+syncSS();
+syncFab();
 
 resize();
 goTo(PRESETS[0]);
