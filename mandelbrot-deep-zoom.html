@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#04050a">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Deep Zoom — quasi-self-similarity in the Mandelbrot set</title>
+<style>
+  :root{
+    --bg:#04050a; --panel:rgba(9,12,20,.9); --line:#1b2438;
+    --txt:#c8d4ec; --dim:#647394; --accent:#ffd479; --accent2:#7dd3fc;
+    --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;
+    font-family:var(--mono);color:var(--txt);-webkit-font-smoothing:antialiased}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+  #gl.drag{cursor:grabbing}
+
+
+  #panel{position:fixed;top:12px;right:12px;width:310px;max-height:calc(100% - 24px);
+    overflow-y:auto;background:var(--panel);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:12px;padding:14px;font-size:11px;
+    line-height:1.45;z-index:10}
+  #panel.hidden{display:none}
+  #panel::-webkit-scrollbar{width:8px}
+  #panel::-webkit-scrollbar-thumb{background:#1f2942;border-radius:4px}
+
+  h1{font-size:12px;margin:0 0 3px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  .sub{color:var(--dim);font-size:10px;margin:0 0 11px;line-height:1.55}
+  .grp{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+  .grp-t{font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:9px}
+  .row{margin-bottom:10px}
+  .lab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px}
+  .val{color:var(--accent);font-size:10px;text-align:right;white-space:nowrap}
+  input[type=range]{width:100%;height:3px;-webkit-appearance:none;appearance:none;
+    background:#1e283f;border-radius:2px;outline:none;margin:0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+    border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #05080f}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;
+    background:var(--accent);cursor:pointer;border:2px solid #05080f}
+  .btns{display:flex;flex-wrap:wrap;gap:5px}
+  button{font-family:var(--mono);font-size:10px;padding:5px 8px;border-radius:6px;
+    border:1px solid var(--line);background:#0d1320;color:var(--txt);cursor:pointer;
+    flex:0 0 auto;text-align:left}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent);color:#12100a;border-color:var(--accent);font-weight:700}
+  .pbtn{display:block;width:100%;margin-bottom:4px}
+  .pbtn small{display:block;color:var(--dim);font-size:9px;font-weight:400;margin-top:2px}
+  .pbtn:hover small,.pbtn.on small{color:inherit;opacity:.75}
+
+  #hud{position:fixed;left:12px;top:12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;font-size:10.5px;line-height:1.75;z-index:10;
+    backdrop-filter:blur(14px);pointer-events:none;max-width:340px}
+  #hud b{color:var(--accent);font-weight:600}
+  #hud .k{color:var(--dim);display:inline-block;min-width:98px}
+  #hud .sc{color:var(--accent2)}
+
+  .inset-lab{position:fixed;z-index:11;font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--dim);pointer-events:none;background:rgba(4,5,10,.75);padding:2px 5px;border-radius:3px}
+  details{margin-top:10px}
+  summary{cursor:pointer;color:var(--dim);font-size:10px;letter-spacing:.1em;
+    text-transform:uppercase;outline:none}
+  details p{color:var(--dim);font-size:10px;line-height:1.65;margin:8px 0 0}
+  details b{color:var(--txt)}
+  .hint{position:fixed;left:12px;bottom:12px;color:var(--dim);font-size:10px;z-index:10;
+    line-height:1.6;pointer-events:none}
+  #err{position:fixed;inset:0;display:none;place-items:center;padding:40px;text-align:center;
+    color:#f5a9c8;font-size:13px;line-height:1.7;z-index:20}
+
+  /* ───────────────────────────── touch layout ───────────────────────────── */
+  .fab{position:fixed;z-index:30;display:none;align-items:center;justify-content:center;
+    border-radius:999px;background:rgba(13,19,32,.92);border:1px solid var(--line);
+    color:var(--txt);backdrop-filter:blur(14px);font-family:var(--mono);
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;cursor:pointer}
+  .fab:active{transform:scale(.94)}
+  .fab.prim{background:var(--accent);color:#12100a;border-color:var(--accent);font-weight:700}
+  body.touch .fab{display:flex}
+
+  #fab-dive{left:50%;transform:translateX(-50%);bottom:calc(22px + env(safe-area-inset-bottom));
+    height:56px;min-width:132px;padding:0 22px;font-size:14px;letter-spacing:.06em}
+  #fab-dive:active{transform:translateX(-50%) scale(.94)}
+  #fab-set{right:16px;bottom:calc(26px + env(safe-area-inset-bottom));width:48px;height:48px;font-size:19px}
+  #fab-out{left:16px;bottom:calc(26px + env(safe-area-inset-bottom));width:48px;height:48px;font-size:19px}
+
+  body.touch .hint{display:none}
+  body.touch #hud{font-size:9.5px;padding:7px 9px;line-height:1.6;max-width:none;
+    left:8px;top:calc(8px + env(safe-area-inset-top))}
+  body.touch #hud .k{min-width:82px}
+  body.touch .inset-lab{display:none}
+
+  body.touch #panel{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;
+    max-height:78vh;border-radius:16px 16px 0 0;border-bottom:none;
+    padding:14px 16px calc(20px + env(safe-area-inset-bottom));
+    transform:translateY(101%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+    -webkit-overflow-scrolling:touch}
+  body.touch #panel.open{transform:translateY(0)}
+  body.touch #panel::before{content:"";display:block;width:36px;height:4px;border-radius:2px;
+    background:#2c3a5c;margin:-4px auto 12px}
+  body.touch button{padding:9px 12px;font-size:11px}
+  body.touch .pbtn{padding:10px 12px}
+  body.touch input[type=range]{height:16px;background:transparent}
+  body.touch input[type=range]::-webkit-slider-thumb{width:22px;height:22px}
+  body.touch input[type=range]::-moz-range-thumb{width:22px;height:22px}
+  body.touch .row{margin-bottom:15px}
+  body.touch .lab{font-size:12px}
+
+  /* while diving, get everything out of the way but leave a stop button */
+  body.touch.diving #hud,
+  body.touch.diving #fab-set,
+  body.touch.diving #fab-out{opacity:0;pointer-events:none;transition:opacity .25s}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+
+<div id="hud">
+  <div><span class="k">magnification</span><b id="h-mag">1×</b></div>
+  <div><span class="k">whole set would be</span><span class="sc" id="h-phys">screen-sized</span></div>
+  <div><span class="k">iterations</span><b id="h-it">0</b> · skipping <b id="h-skip">0</b> <span id="h-skippc"></span></div>
+  <div><span class="k">precision</span><b id="h-bits">0</b> bits · ref <b id="h-ref">0</b> · <span id="h-reft">0</span> ms</div>
+  <div><span class="k">fps</span><b id="h-fps">–</b></div>
+</div>
+
+<div class="inset-lab" id="lab-a">whole set · you are here</div>
+<div class="inset-lab" id="lab-b">julia set at this c</div>
+
+<div id="panel">
+  <h1>Deep Zoom</h1>
+  <p class="sub">Rescaled perturbation with an exact arbitrary-precision reference orbit. No fixed depth wall — go as deep as you're willing to wait for. Watch mini-brots arrive <b>distorted, differently at every location</b>.</p>
+
+  <div class="grp" style="border-top:none;margin-top:0;padding-top:0">
+    <div class="grp-t">Landmarks</div>
+    <div id="presets"></div>
+  </div>
+
+  <div class="grp">
+    <div class="grp-t">Dive</div>
+    <div class="btns" style="margin-bottom:9px">
+      <button id="b-dive">Dive in</button>
+      <button id="b-out">Dive out</button>
+      <button id="b-home">Reset</button>
+    </div>
+    <div id="c-dive"></div>
+  </div>
+
+  <div class="grp">
+    <div class="grp-t">Droste warp</div>
+    <div class="btns" style="margin-bottom:9px">
+      <button id="b-droste">Off</button>
+      <button id="b-dspin" class="on">Spin</button>
+    </div>
+    <div id="c-droste"></div>
+  </div>
+
+  <div class="grp">
+    <div class="grp-t">Render</div>
+    <div id="c-render"></div>
+    <div class="btns">
+      <button id="b-series" class="on">Series approx</button>
+      <button id="b-ss" class="on">4x samples</button>
+      <button id="b-insets" class="on">Insets</button>
+      <button id="b-pal">Palette</button>
+      <button id="b-snap">PNG</button>
+    </div>
+  </div>
+
+  <details open>
+    <summary>What to look for</summary>
+    <p><b>Seahorse vs Elephant vs Triple Spiral.</b> Same rule, same iteration, wildly different local decoration. If the set were self-similar these would converge to one picture. They don't — the local structure encodes your address.</p>
+    <p><b>Misiurewicz c = i.</b> Compare the main view to the Julia inset as you dive. They converge on each other. That's Tan Lei's 1990 theorem: at Misiurewicz points the Mandelbrot set is asymptotically similar to the corresponding <i>Julia</i> set — not to itself.</p>
+    <p><b>Feigenbaum point.</b> The one landmark that <i>is</i> asymptotically self-similar, repeating at ratio δ = 4.669…, the same constant that governs period-doubling in dripping taps and heart arrhythmias.</p>
+    <p><b>Speckle.</b> Near a chaotic boundary a pixel can sit on a knife edge where a one-bit difference flips its escape count by hundreds. WebGL has no doubles, and measured against exact ground truth, emulating them costs about 6× the shader time to remove only a third of the visible speckle — a bad trade. <b>4x samples</b> is the better one: it doesn't correct a bad sample, it dilutes it to quarter weight. Turn it off to see the difference. The real cure is per-pixel glitch detection against multiple reference orbits, which is what dedicated software does.</p>
+    <p><b>On "infinite".</b> There's no hard wall now — precision grows with depth automatically. But each decade down needs more iterations and more bits, so the cost climbs without bound. You can always go one more level. You can never go all the way. Raise <b>Iteration budget</b> when detail turns to mush; that's the signal you've outrun it.</p>
+  </details>
+</div>
+
+<div class="hint">drag = pan · scroll = zoom at cursor · <b>space</b> = dive · <b>H</b> = hide panel</div>
+
+<button class="fab prim" id="fab-dive">DIVE IN</button>
+<button class="fab" id="fab-out" title="Dive out">&#8599;</button>
+<button class="fab" id="fab-set" title="Settings">&#9881;</button>
+
+<div id="err"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+if (typeof THREE === "undefined") {
+  var ee = document.getElementById("err");
+  ee.style.display = "grid";
+  ee.textContent = "Could not load three.js from the CDN. Open this file while online.";
+  return;
+}
+
+/* ═══════════════ arbitrary-precision centre, precision follows depth ══════ */
+
+var FRAC = 128n;                       // fractional bits — grows with zoom
+var FXONE = 1n << FRAC;
+
+function toFx(x) {
+  var neg = x < 0; x = Math.abs(x);
+  var acc = BigInt(Math.floor(x)) << FRAC, f = x - Math.floor(x);
+  for (var b = 1n; b <= FRAC; b++) { f *= 2; if (f >= 1) { acc |= (1n << (FRAC - b)); f -= 1; } }
+  return neg ? -acc : acc;
+}
+/* 2^FRAC overflows a double once FRAC >= 1024, which would make Number(FXONE)
+ * Infinity and silently discard the whole fractional part. Never materialise
+ * it — take the top 64 bits and apply the exponent separately. */
+function fxToNum(a) {
+  var neg = a < 0n; if (neg) a = -a;
+  if (a === 0n) return 0;
+  var bits = a.toString(2).length;
+  var sh = bits > 64 ? BigInt(bits - 64) : 0n;
+  var v = Number(a >> sh) * Math.pow(2, Number(sh) - Number(FRAC));
+  return neg ? -v : v;
+}
+
+/* Landmark coordinates need far more digits than a double literal holds, so
+ * they're stored as decimal strings and parsed straight into fixed point. */
+function toFxStr(s) {
+  var neg = s.charAt(0) === "-";
+  if (neg || s.charAt(0) === "+") s = s.slice(1);
+  var dot = s.indexOf("."), ip = dot < 0 ? s : s.slice(0, dot);
+  var fp = dot < 0 ? "" : s.slice(dot + 1);
+  var acc = BigInt(ip || "0") << FRAC;
+  if (fp.length) acc += (BigInt(fp) << FRAC) / (10n ** BigInt(fp.length));
+  return neg ? -acc : acc;
+}
+function fxMul(a, b) { return (a * b) >> FRAC; }
+function FX_FOUR() { return 4n << FRAC; }
+
+/* ══════════════════════════════════════════════════════ reference orbit ══ */
+
+var ORB_W = 1024, ORB_H = 32, ORB_MAX = ORB_W * ORB_H;     // 32,768 points
+var orbData = new Float32Array(ORB_MAX * 4);
+var refZ    = new Float64Array(ORB_MAX * 2);   // same orbit at full double precision,
+                                               // used by the series recurrence
+var orbTex = new THREE.DataTexture(orbData, ORB_W, ORB_H, THREE.RGBAFormat, THREE.FloatType);
+orbTex.minFilter = orbTex.magFilter = THREE.NearestFilter;
+orbTex.generateMipmaps = false;
+orbTex.needsUpdate = true;
+
+var ref = { cx: 0n, cy: 0n, len: 0, ms: 0, frac: FRAC };
+
+function computeReference(cxFx, cyFx, maxIter) {
+  var t0 = performance.now();
+  var n = Math.min(maxIter + 2, ORB_MAX), four = FX_FOUR();
+  var zx = 0n, zy = 0n, i;
+  orbData[0] = 0; orbData[1] = 0;
+  for (i = 1; i < n; i++) {
+    var t = fxMul(zx, zx) - fxMul(zy, zy) + cxFx;
+    zy = 2n * fxMul(zx, zy) + cyFx;
+    zx = t;
+    var dx = fxToNum(zx), dy = fxToNum(zy);
+    orbData[i * 4] = dx; orbData[i * 4 + 1] = dy;
+    refZ[i * 2]    = dx; refZ[i * 2 + 1]    = dy;
+    if (fxMul(zx, zx) + fxMul(zy, zy) > four) { i++; break; }
+  }
+  ref.cx = cxFx; ref.cy = cyFx; ref.len = i - 1; ref.frac = FRAC;
+  ref.ms = performance.now() - t0;
+  orbTex.needsUpdate = true;
+  series.N = -1;                                    // force a series rebuild
+}
+
+/* ══════════════════════════════════════════════ series approximation ═════ */
+/* dz_n is a power series in dc:   dz_n = Σ A_k · dc^k ,  k = 1..K
+ * Substituting into  dz' = 2·Z·dz + dz² + dc  and collecting powers gives
+ *     A'_1 = 2·Z·A_1 + 1
+ *     A'_k = 2·Z·A_k + Σ_{j=1}^{k-1} A_j · A_{k-j}        (a convolution)
+ * The A_k depend only on the reference orbit, so they're built once on the CPU
+ * and every pixel then jumps straight to iteration N instead of iterating to it. */
+
+var SK = 10;                                  // terms — 10 is the knee of the curve
+var SNAP = 16;                                // snapshot stride
+var series = { N: -1, logS: 0, f: 0, co: new Float32Array(SK * 2),
+               scale: 0, ms: 0, skipped: 0 };
+var saCur = new Float64Array(SK * 2), saTmp = new Float64Array(SK * 2);
+var saSnaps = [], saSnapN = [];
+
+function seriesStep(A, T, Zx, Zy) {
+  for (var k = 1; k <= SK; k++) {
+    var sx = 0, sy = 0;
+    for (var j = 1; j < k; j++) {
+      var ax = A[2*(j-1)], ay = A[2*(j-1)+1], bx = A[2*(k-j-1)], by = A[2*(k-j-1)+1];
+      sx += ax*bx - ay*by; sy += ax*by + ay*bx;
+    }
+    var px = A[2*(k-1)], py = A[2*(k-1)+1];
+    T[2*(k-1)]   = 2*(Zx*px - Zy*py) + sx + (k === 1 ? 1 : 0);
+    T[2*(k-1)+1] = 2*(Zx*py + Zy*px) + sy;
+  }
+  A.set(T);
+}
+
+function buildSeries(scale, R) {
+  var t0 = performance.now();
+  saCur.fill(0); saSnaps.length = 0; saSnapN.length = 0;
+  var best = 0, k, ok, t1, tK, RK = Math.pow(R, SK);
+  var lim = Math.min(ref.len - 1, ORB_MAX - 4);
+
+  for (var n = 0; n < lim; n++) {
+    seriesStep(saCur, saTmp, refZ[n*2], refZ[n*2+1]);
+    ok = true;
+    for (k = 0; k < SK * 2; k++) {
+      var v = saCur[k];
+      if (!isFinite(v) || Math.abs(v) > 1e290) { ok = false; break; }
+    }
+    if (!ok) break;
+    t1 = Math.hypot(saCur[0], saCur[1]) * R;
+    tK = Math.hypot(saCur[2*(SK-1)], saCur[2*(SK-1)+1]) * RK;
+    if (!(tK * 1e6 < t1)) break;                 // last term must be 1e6× below the first
+    best = n + 1;
+    if (best % SNAP === 0) { saSnaps.push(new Float64Array(saCur)); saSnapN.push(best); }
+  }
+
+  var margin = Math.max(0, Math.min(best - 8, Math.floor(best * 0.95)));
+  var pick = -1;
+  for (var s = saSnapN.length - 1; s >= 0; s--) if (saSnapN[s] <= margin) { pick = s; break; }
+
+  if (pick < 0) {
+    series.N = 0; series.f = 1; series.logS = Math.log2(scale);
+    series.co.fill(0); series.skipped = 0;
+  } else {
+    var Ac = saSnaps[pick];                       // not `A` — that's the audio state
+    var mA = Math.hypot(Ac[0], Ac[1]);
+    var E = mA > 0 ? Math.round(Math.log2(mA)) : 0;
+    var f = Math.pow(2, -E), sp = f;
+    for (k = 1; k <= SK; k++) {
+      series.co[2*(k-1)]   = Ac[2*(k-1)]   * sp;
+      series.co[2*(k-1)+1] = Ac[2*(k-1)+1] * sp;
+      sp *= scale;                                // A_k · scale^(k-1) · 2^-E
+    }
+    series.N = saSnapN[pick];
+    series.logS = Math.log2(scale) + E;
+    series.f = E > 100 ? 0 : f;
+    series.skipped = series.N;
+  }
+  series.scale = scale;
+  series.ms = performance.now() - t0;
+}
+
+/* ═══════════════════════════════════════════════════════════════ shader ══ */
+
+var VERT = "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy,0.0,1.0); }";
+
+/* Rescaled perturbation.  Write dz = S·dzs and dc = S·dcs with S = 2^logS.
+ * The iteration becomes   dzs' = 2·Z·dzs + S·dzs² + dcs
+ * and dzs is renormalised toward 1 each step, with logS absorbing the range.
+ * That decouples zoom depth from the float32 exponent range entirely.       */
+var FRAG = [
+"#define MAXLOOP 32768",
+"#define FLOOR -110.0",
+"precision highp float;",
+"varying vec2 vUv;",
+"uniform sampler2D uOrbit;",
+"uniform vec2  uOrbitSize;",
+"uniform float uOrbitLen;",
+"uniform vec2  uDcsBase;",     // (view centre − reference centre) / scale
+"uniform float uLogS0;",       // log2(scale)
+"uniform float uAspect;",
+"uniform float uMaxIter;",
+"uniform int   uMode;",        // 0 rescaled M   1 julia   2 plain M
+"uniform vec2  uPlainCenter;",
+"uniform float uPlainScale;",
+"uniform vec2  uJuliaC;",
+"uniform float uColShift, uColScale;",
+"uniform int   uPalette;",
+"uniform float uMarkerOn;",
+"uniform vec2  uMarker;",
+"uniform float uMarkerR;",
+"uniform vec2  uJitter;",      // sub-pixel offset for this accumulation pass
+"uniform float uWeight;",      // 1/N, so N additive passes average
+"uniform float uPixel;",       // one pixel, in p units
+"uniform float uSkipN;",       // series approximation entry iteration (0 = disabled)
+"uniform float uSkipLogS;",
+"uniform float uSkipF;",
+"uniform vec2  uSA[10];",      // pre-scaled series coefficients A_1 … A_10
+"uniform float uDroste;",      // 0 off · 1 spiral · 2 tiled tunnel
+"uniform float uDTwist;",      // windings per radial period
+"uniform float uDLambda;",     // radial period (zoom factor per turn)
+"uniform float uDPhase;",
+
+"vec2 cmul(vec2 a, vec2 b){ return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }",
+"float rnd(float x){ return floor(x + 0.5); }",
+
+"vec2 orbitAt(float i){",
+"  float w = uOrbitSize.x;",
+"  return texture2D(uOrbit, vec2((mod(i,w)+0.5)/w, (floor(i/w)+0.5)/uOrbitSize.y)).xy;",
+"}",
+
+"vec3 pal(float t){",
+"  if (uPalette == 0) return 0.5 + 0.5*cos(6.28318*(t + vec3(0.00,0.10,0.20)) + vec3(0.0,0.6,1.0));",
+"  if (uPalette == 1) return 0.5 + 0.5*cos(6.28318*(t + vec3(0.0,0.33,0.67)));",
+"  if (uPalette == 2) return 0.5 + 0.5*cos(6.28318*(vec3(1.0,0.7,0.4)*t + vec3(0.0,0.15,0.30)));",
+"  return vec3(1.0) - (0.5 + 0.5*cos(6.28318*(t + vec3(0.0,0.05,0.1))));",
+"}",
+
+"vec3 shade(vec2 p){",
+
+/* Droste–Escher conformal map, in log-polar coordinates.
+ * Shearing log(r) against theta turns concentric scaling into a spiral; the
+ * tiled variant wraps log(r) into a single period, which forces the picture to
+ * repeat every factor lambda inward — a periodicity the set does not actually
+ * have, so the mismatch you see at the seam is the honest part.            */
+"  if (uMode == 0 && uDroste > 0.5) {",
+"    float r  = max(length(p), 1e-7);",
+"    float th = atan(p.y, p.x);",
+"    float lnL = log(max(uDLambda, 1.0001));",
+"    float lr = log(r) + uDTwist * th * lnL / 6.2831853 + uDPhase * lnL;",
+"    if (uDroste > 1.5) lr = mod(lr, lnL) - lnL;",
+"    p = vec2(cos(th), sin(th)) * exp(lr);",
+"  }",
+
+"  bool escaped = false;",
+"  float sn = 0.0;",
+"  int iters = int(uMaxIter);",
+
+"  if (uMode == 1) {",
+"    vec2 z = uPlainCenter + p * uPlainScale;",
+"    for (int k = 0; k < MAXLOOP; k++){",
+"      if (k >= iters) break;",
+"      z = cmul(z,z) + uJuliaC;",
+"      float r2 = dot(z,z);",
+"      if (r2 > 1.0e8){ escaped=true; sn = float(k)+1.0-log(log(sqrt(r2))/log(1.0e4))/log(2.0); break; }",
+"    }",
+"  } else if (uMode == 2) {",
+"    vec2 c = uPlainCenter + p * uPlainScale;",
+"    vec2 z = vec2(0.0);",
+"    for (int k = 0; k < MAXLOOP; k++){",
+"      if (k >= iters) break;",
+"      z = cmul(z,z) + c;",
+"      float r2 = dot(z,z);",
+"      if (r2 > 1.0e8){ escaped=true; sn = float(k)+1.0-log(log(sqrt(r2))/log(1.0e4))/log(2.0); break; }",
+"    }",
+"  } else {",
+"    vec2 dcs = uDcsBase + p;",           // order 1 by construction
+"    vec2 dzs; float logS, m, n;",
+"    if (uSkipN > 0.5) {",
+/* Horner:  dz = dc·(A1 + dc·(A2 + dc·(A3 + …)))  — literal indices so this is
+ * a constant-index expression under GLSL ES 1.00 on every driver.          */
+"      vec2 r = uSA[9];",
+"      r = cmul(r,dcs) + uSA[8];",
+"      r = cmul(r,dcs) + uSA[7];",
+"      r = cmul(r,dcs) + uSA[6];",
+"      r = cmul(r,dcs) + uSA[5];",
+"      r = cmul(r,dcs) + uSA[4];",
+"      r = cmul(r,dcs) + uSA[3];",
+"      r = cmul(r,dcs) + uSA[2];",
+"      r = cmul(r,dcs) + uSA[1];",
+"      r = cmul(r,dcs) + uSA[0];",
+"      dzs  = cmul(r, dcs);",
+"      m    = uSkipN;",
+"      n    = uSkipN;",
+"      logS = uSkipLogS;",
+"      dcs *= uSkipF;",                   // dc lives in units of S, which just changed
+"    } else {",
+"      dzs = vec2(0.0); m = 0.0; n = 0.0; logS = uLogS0;",
+"    }",
+"    for (int k = 0; k < MAXLOOP; k++){",
+"      if (n >= uMaxIter) break;",
+"      float q = (logS < FLOOR) ? 0.0 : exp2(logS);",
+"      vec2 Z = orbitAt(m);",
+"      dzs = 2.0*cmul(Z,dzs) + (q*cmul(dzs,dzs) + dcs);",
+"      m += 1.0; n += 1.0;",
+
+"      float mg = dot(dzs,dzs);",         // renormalise dzs toward 1
+"      if (mg > 1.0e12 || (mg < 1.0e-12 && mg > 0.0)) {",
+"        float sh = rnd(0.5*log2(mg));",
+"        float f = exp2(-sh);",
+"        dzs *= f; dcs *= f; logS += sh;",
+"      }",
+
+"      float q2 = (logS < FLOOR) ? 0.0 : exp2(logS);",
+"      vec2 dtrue = q2 * dzs;",
+"      vec2 z = orbitAt(m) + dtrue;",
+"      float r2 = dot(z,z);",
+"      if (r2 > 1.0e8){ escaped=true; sn = n+1.0-log(log(sqrt(r2))/log(1.0e4))/log(2.0); break; }",
+"      if (r2 < dot(dtrue,dtrue) || m >= uOrbitLen - 1.0) {",   // rebase
+"        float az = max(abs(z.x), abs(z.y));",
+"        float k2 = (az > 0.0) ? rnd(log2(az)) : 0.0;",
+"        float d  = logS - k2;",
+"        dcs *= (d < FLOOR) ? 0.0 : exp2(d);",
+"        dzs  = z * exp2(-k2);",
+"        logS = k2;",
+"        m = 0.0;",
+"      }",
+"    }",
+"  }",
+
+"  if (!escaped) return vec3(0.02,0.025,0.05);",
+"  return pal(sqrt(max(sn,0.0)) * uColScale * 0.06 + uColShift);",
+"}",
+
+/* Residual wrong pixels are chaotic-boundary sensitivity, not a fixable bug —
+ * see the note in the panel. Averaging four sub-samples doesn't correct them,
+ * but it drops an isolated bad sample to a quarter weight, which is the
+ * difference between a bright speckle and something you don't notice.       */
+"void main(){",
+"  vec2 p = (vUv - 0.5) * 2.0;",
+"  p.x *= uAspect;",
+/* Exactly ONE call to shade(). Calling it N times here makes the compiler
+ * inline N copies of a 32768-iteration loop, which destroys occupancy — that
+ * is what bogged the card. Supersampling is done with N cheap draw calls and
+ * additive blending instead, so the shader stays one copy.                  */
+"  vec3 col = shade(p + uJitter * uPixel) * uWeight;",
+"  if (uMarkerOn > 0.5) {",
+"    vec2 wp = uPlainCenter + p * uPlainScale;",
+"    if (abs(length(wp - uMarker)/uPlainScale - uMarkerR) < 0.02) col = mix(col, vec3(1.0,0.35,0.45), 0.92);",
+"  }",
+"  gl_FragColor = vec4(col, 1.0);",
+"}"
+].join("\n");
+
+/* ═════════════════════════════════════════════════════════════ renderer ══ */
+
+/* Touch-first layout when the primary input is a finger. Screen width alone
+ * misfires on small laptop windows and on tablets held in landscape. */
+var IS_TOUCH = (function () {
+  try {
+    var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    var touch  = ("ontouchstart" in window) ||
+                 (navigator.maxTouchPoints || 0) > 0 ||
+                 (navigator.msMaxTouchPoints || 0) > 0;
+    var mobileUA = /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(navigator.userAgent || "");
+    var iPadOS = /Macintosh/.test(navigator.userAgent || "") && (navigator.maxTouchPoints || 0) > 1;
+    return !!(coarse || mobileUA || iPadOS) && !!touch;
+  } catch (e) { return false; }
+})();
+if (IS_TOUCH && document.body) document.body.className += " touch";
+
+var canvas = document.getElementById("gl");
+var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setClearColor(0x04050a, 1);
+
+var scene = new THREE.Scene();
+var cam2d = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+var uni = {
+  uOrbit:       { value: orbTex },
+  uOrbitSize:   { value: new THREE.Vector2(ORB_W, ORB_H) },
+  uOrbitLen:    { value: 1 },
+  uDcsBase:     { value: new THREE.Vector2(0, 0) },
+  uLogS0:       { value: 0 },
+  uAspect:      { value: 1 },
+  uMaxIter:     { value: 300 },
+  uMode:        { value: 0 },
+  uPlainCenter: { value: new THREE.Vector2(-0.6, 0) },
+  uPlainScale:  { value: 1.3 },
+  uJuliaC:      { value: new THREE.Vector2(0, 0) },
+  uColShift:    { value: 0.0 },
+  uColScale:    { value: 1.0 },
+  uPalette:     { value: 0 },
+  uMarkerOn:    { value: 0.0 },
+  uMarker:      { value: new THREE.Vector2(0, 0) },
+  uMarkerR:     { value: 0.07 },
+  uJitter:      { value: new THREE.Vector2(0, 0) },
+  uWeight:      { value: 1.0 },
+  uPixel:       { value: 0.002 },
+  uSkipN:       { value: 0.0 },
+  uSkipLogS:    { value: 0.0 },
+  uSkipF:       { value: 1.0 },
+  uSA:          { value: (function(){ var a=[]; for(var i=0;i<10;i++) a.push(new THREE.Vector2(0,0)); return a; })() },
+  uDroste:      { value: 0.0 },
+  uDTwist:      { value: 1.0 },
+  uDLambda:     { value: 6.0 },
+  uDPhase:      { value: 0.0 }
+};
+
+var quad = new THREE.Mesh(
+  new THREE.PlaneGeometry(2, 2),
+  new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: uni, depthTest: false })
+);
+quad.frustumCulled = false;
+scene.add(quad);
+
+/* ═════════════════════════════════════════════════════════════════ view ══ */
+
+var HOME = { x: -0.6, y: 0.0, scale: 1.3 };
+var view = { cx: toFx(HOME.x), cy: toFx(HOME.y), scale: HOME.scale };
+var MAX_MAG = 1e290;                       // JS double floor on `scale`
+
+var P = { quality: 1.0, colScale: 1.0, colShift: 0.0, diveRate: 0.55,
+          dTwist: 1.0, dLambda: 6.0, dSpin: 0.08 };
+var diving = 0, showInsets = true, palette = 0, needRef = true;
+var droste = 0, dPhase = 0;                     // 0 off · 1 spiral · 2 tunnel
+var useSeries = true, superSample = 1;
+/* Sub-pixel offsets per accumulation pass, in pixel units. */
+var JITTER = {
+  1: [0, 0],
+  2: [-0.25,-0.25,  0.25,-0.25, -0.25, 0.25,  0.25, 0.25],
+  3: [-0.333,-0.333, 0,-0.333, 0.333,-0.333,
+      -0.333, 0,     0, 0,     0.333, 0,
+      -0.333, 0.333, 0, 0.333, 0.333, 0.333]
+};
+
+
+function magnification() { return HOME.scale / view.scale; }
+
+function currentIters() {
+  var m = Math.max(1, magnification());
+  var it = (180 + 260 * Math.log(m) / Math.LN10) * P.quality;
+  return Math.max(80, Math.min(ORB_MAX - 4, Math.round(it)));
+}
+
+/* precision tracks depth: enough bits for the scale, plus headroom */
+/* Floor of 256 bits (~77 decimal digits) so a 52-digit landmark survives being
+ * loaded at a shallow scale. And FRAC only ever grows: shrinking it would
+ * discard digits you'd need again on the way back down. */
+function neededFrac() {
+  var bits = 96 + Math.ceil(Math.log2(1 / Math.max(view.scale, 1e-300)));
+  var want = BigInt(Math.max(256, Math.min(4096, Math.ceil(bits / 64) * 64)));
+  return want > FRAC ? want : FRAC;
+}
+function setFrac(nf) {
+  if (nf <= FRAC) return;
+  view.cx <<= (nf - FRAC);
+  view.cy <<= (nf - FRAC);
+  FRAC = nf; FXONE = 1n << FRAC;
+  needRef = true;
+}
+
+function refreshReferenceIfNeeded() {
+  setFrac(neededFrac());
+  var it = currentIters();
+  var drift = Math.max(Math.abs(fxToNum(view.cx - ref.cx)), Math.abs(fxToNum(view.cy - ref.cy)));
+  if (needRef || ref.frac !== FRAC || drift > view.scale * 1.5 ||
+      ref.len < Math.min(it, ORB_MAX - 4) - 1) {
+    computeReference(view.cx, view.cy, it);
+    needRef = false;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════ presets ══ */
+
+/* Coordinates carrying only 6–7 digits run out at about 1e-7 of zoom: the
+ * structure slides off screen and you're left staring at flat colour. These
+ * were re-derived by hill-climbing each landmark onto the set boundary at
+ * 1024-bit precision, then verified to still show detail at 1e-40.          */
+var PRESETS = [
+  { n:"Home",            d:"the whole object",                       x:"-0.6", y:"0", s:1.3 },
+  { n:"Seahorse Valley", d:"spirals wrapped in seahorse tails",
+    x:"-0.7434355539003074868704666827667972456664507933432793",
+    y:"0.1312009036843907583093205602566699284831764593906338",  s:5e-4 },
+  { n:"Elephant Valley", d:"same rule, totally different decoration",
+    x:"0.2960956788750298127425020661411736377186735297132482",
+    y:"0.0195004366286483488771006074882251440839134180311223",  s:5e-3 },
+  { n:"Triple Spiral",   d:"three-fold, and it stays three-fold",
+    x:"-0.0928594679821893892675932906257878980377972178036907",
+    y:"0.6487265446360835691285772715793487917093146105366651",  s:8e-3 },
+  { n:"Feigenbaum pt",   d:"the one that IS self-similar · δ=4.669",
+    x:"-1.401155189092", y:"0", s:2e-3 },
+  { n:"Misiurewicz c=i", d:"dive here and watch the Julia inset",
+    x:"0", y:"1", s:5e-2 },
+  { n:"Mini-brot",       d:"a whole copy, visibly distorted",
+    x:"-1.7746443758048389375080575143776330039907891800236228",
+    y:"-0.0040013407317713918016567721319735334816048962543813", s:6e-3 },
+  { n:"Julia island",    d:"deep spiral nest — start here for depth",
+    x:"-0.7746839602186956303242732868706975016019511870301830",
+    y:"-0.1374215927939575385643055686538138729008423833910330", s:5e-6 },
+  { n:"Spiral cluster",  d:"nested spirals, no two alike",
+    x:"-0.2350361243347129400398824295743556713037217836067210",
+    y:"0.8273390778979832867738123869152519116005937281976985",  s:4e-3 },
+  { n:"Antenna tip",     d:"c = −2 exactly · pure dendrite, no area",
+    x:"-2", y:"0", s:1.2e-2 },
+  { n:"Cardioid cusp",   d:"c = ¼ exactly · parabolic, infinitely slow",
+    x:"0.25", y:"0", s:1.0e-2 },
+  { n:"Root point",      d:"c = −¾ exactly · where seahorses open",
+    x:"-0.75", y:"0", s:2.0e-2 },
+  { n:"Period-3 root",   d:"c = −⅛ + 0.649519i · exact bulb junction",
+    x:"-0.125", y:"0.6495190528383290", s:1.2e-2 }
+];
+function goTo(p) {
+  view.scale = p.s;
+  setFrac(neededFrac());
+  view.cx = toFxStr(p.x); view.cy = toFxStr(p.y);
+  needRef = true;
+}
+
+/* ═══════════════════════════════════════════════════════════════ layout ══ */
+
+var W = 1, H = 1;
+function resize() {
+  W = Math.max(2, window.innerWidth); H = Math.max(2, window.innerHeight);
+  renderer.setSize(W, H, false);
+  positionLabels();
+}
+window.addEventListener("resize", resize);
+
+function insetRects() {
+  var w = Math.round(Math.min(230, W * 0.22)), h = Math.round(w * 0.75), pad = 12;
+  return [ { x: W-w-pad, y: pad, w: w, h: h }, { x: W-w-pad, y: pad+h+8, w: w, h: h } ];
+}
+function positionLabels() {
+  var r = insetRects();
+  var a = document.getElementById("lab-a"), b = document.getElementById("lab-b");
+  a.style.left = r[0].x + "px"; a.style.top = (H - r[0].y - 12) + "px";
+  b.style.left = r[1].x + "px"; b.style.top = (H - r[1].y - 12) + "px";
+  a.style.display = b.style.display = showInsets ? "block" : "none";
+}
+
+/* ═══════════════════════════════════════════════════════════════ render ══ */
+
+function renderAll() {
+  refreshReferenceIfNeeded();
+  var it = currentIters();
+  var dcbx = fxToNum(view.cx - ref.cx) / view.scale;
+  var dcby = fxToNum(view.cy - ref.cy) / view.scale;
+
+  uni.uMaxIter.value  = it;
+  uni.uOrbitLen.value = Math.max(2, ref.len);
+  uni.uColScale.value = P.colScale;
+  uni.uColShift.value = P.colShift;
+  uni.uPalette.value  = palette;
+  uni.uMarkerOn.value = 0;
+  /* Series validity depends on the corner radius R, which shrinks as you dive.
+   * A series built at a LARGER R is always conservative (it skips fewer
+   * iterations than it could), so a slightly stale one is safe — but never a
+   * stale one built at a smaller R. Rebuild on any meaningful scale change.  */
+  if (useSeries) {
+    var R = view.scale * (Math.hypot(W / H, 1) + Math.hypot(dcbx, dcby));
+    if (series.N < 0 || series.scale <= 0 ||
+        Math.abs(Math.log2(view.scale / series.scale)) > 0.4) {
+      buildSeries(view.scale, R);
+    }
+    uni.uSkipN.value    = series.N;
+    uni.uSkipLogS.value = series.logS;
+    uni.uSkipF.value    = series.f;
+    for (var si = 0; si < SK; si++)
+      uni.uSA.value[si].set(series.co[si*2], series.co[si*2+1]);
+  } else {
+    uni.uSkipN.value = 0;
+  }
+
+  uni.uDroste.value   = droste;
+  uni.uDTwist.value   = P.dTwist;
+  uni.uDLambda.value  = P.dLambda;
+  uni.uDPhase.value   = dPhase;
+
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  uni.uMode.value    = 0;
+  uni.uAspect.value  = W / H;
+  uni.uPixel.value   = 2 / H;                 // p spans [-1,1] vertically over H px
+  uni.uLogS0.value   = Math.log2(view.scale);
+  uni.uDcsBase.value.set(dcbx, dcby);
+
+  /* Only supersample when the view is actually still. While diving or dragging
+   * the extra passes cost real milliseconds and buy nothing you can perceive. */
+  var moving = (diving !== 0) || dragging;
+  var axis = moving ? 1 : superSample;
+  var J = JITTER[axis] || JITTER[1];
+  var N = J.length / 2;
+
+  uni.uWeight.value = 1 / N;
+  for (var sp = 0; sp < N; sp++) {
+    uni.uJitter.value.set(J[sp * 2], J[sp * 2 + 1]);
+    quad.material.blending = (sp === 0) ? THREE.NoBlending : THREE.AdditiveBlending;
+    renderer.autoClear     = (sp === 0);
+    renderer.render(scene, cam2d);
+  }
+  quad.material.blending = THREE.NoBlending;
+  renderer.autoClear = true;
+  uni.uWeight.value = 1;
+  uni.uJitter.value.set(0, 0);
+
+  if (!showInsets) return;
+  var r = insetRects();
+  renderer.setScissorTest(true);
+
+  var a = r[0];
+  renderer.setViewport(a.x, a.y, a.w, a.h);
+  renderer.setScissor(a.x, a.y, a.w, a.h);
+  uni.uMode.value = 2; uni.uAspect.value = a.w / a.h;
+  uni.uPlainCenter.value.set(-0.6, 0); uni.uPlainScale.value = 1.35;
+  uni.uMaxIter.value = 220; uni.uMarkerOn.value = 1;
+  uni.uMarker.value.set(fxToNum(view.cx), fxToNum(view.cy));
+  renderer.render(scene, cam2d);
+
+  var b = r[1];
+  renderer.setViewport(b.x, b.y, b.w, b.h);
+  renderer.setScissor(b.x, b.y, b.w, b.h);
+  uni.uMode.value = 1; uni.uAspect.value = b.w / b.h;
+  uni.uPlainCenter.value.set(0, 0); uni.uPlainScale.value = 1.45;
+  uni.uJuliaC.value.set(fxToNum(view.cx), fxToNum(view.cy));
+  uni.uMaxIter.value = Math.min(900, it); uni.uMarkerOn.value = 0;
+  renderer.render(scene, cam2d);
+
+  renderer.setScissorTest(false);
+}
+
+/* ════════════════════════════════════════════════════════════════ input ══ */
+
+var dragging = false, lx = 0, ly = 0;
+
+function zoomAt(px, py, factor) {
+  var ax = (px / W - 0.5) * 2 * (W / H) * view.scale;
+  var ay = (0.5 - py / H) * 2 * view.scale;
+  var ns = view.scale * factor;
+  if (HOME.scale / ns > MAX_MAG) { ns = HOME.scale / MAX_MAG; }
+  if (ns > HOME.scale * 4)       { ns = HOME.scale * 4; }
+  factor = ns / view.scale;
+  var dx = ax * (1 - factor), dy = ay * (1 - factor);
+  view.scale = ns;
+  setFrac(neededFrac());
+  view.cx += toFx(dx); view.cy += toFx(dy);
+}
+
+var pointers = {}, pinchDist = 0;
+
+function ptList() { var a = []; for (var k in pointers) if (pointers.hasOwnProperty(k)) a.push(pointers[k]); return a; }
+
+canvas.addEventListener("pointerdown", function (e) {
+  pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+  var p = ptList();
+  if (p.length === 1) { dragging = true; lx = e.clientX; ly = e.clientY; canvas.classList.add("drag"); }
+  else if (p.length === 2) {
+    dragging = false;
+    pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  }
+  if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener("pointermove", function (e) {
+  if (!pointers[e.pointerId]) return;
+  pointers[e.pointerId].x = e.clientX;
+  pointers[e.pointerId].y = e.clientY;
+  var p = ptList();
+
+  if (p.length >= 2) {                                  // pinch to zoom
+    var d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    if (pinchDist > 0 && d > 0) {
+      zoomAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2, pinchDist / d);
+    }
+    pinchDist = d;
+    return;
+  }
+  if (!dragging) return;
+  view.cx -= toFx((e.clientX - lx) / H * 2 * view.scale);
+  view.cy += toFx((e.clientY - ly) / H * 2 * view.scale);
+  lx = e.clientX; ly = e.clientY;
+});
+
+function endDrag(e) {
+  if (e && e.pointerId !== undefined) {
+    delete pointers[e.pointerId];
+    if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId))
+      canvas.releasePointerCapture(e.pointerId);
+  } else { pointers = {}; }
+  var p = ptList();
+  pinchDist = 0;
+  if (p.length === 1) { dragging = true; lx = p[0].x; ly = p[0].y; }
+  else if (p.length === 0) { dragging = false; canvas.classList.remove("drag"); }
+}
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("wheel", function (e) {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? 1.16 : 1 / 1.16);
+}, { passive: false });
+
+window.addEventListener("keydown", function (e) {
+  var k = e.key.toLowerCase();
+  if (k === " " || e.code === "Space") { e.preventDefault(); setDive(diving === 1 ? 0 : 1); syncFab(); }
+  else if (k === "h") document.getElementById("panel").classList.toggle("hidden");
+  else if (k === "r") { goTo(PRESETS[0]); setDive(0); }
+});
+
+/* ═══════════════════════════════════════════════════════════════════ UI ══ */
+
+var CTRLS = [
+  { g:"c-dive",   k:"diveRate", label:"Dive speed",       min:0.05, max:2.5, step:0.01,
+    fmt:function(v){ return v.toFixed(2) + "×/s"; } },
+  { g:"c-droste", k:"dTwist",   label:"Windings",         min:-4,   max:4,   step:0.05,
+    fmt:function(v){ return v.toFixed(2) + (Math.abs(v-Math.round(v))<1e-6 ? " (tiles clean)" : ""); } },
+  { g:"c-droste", k:"dLambda",  label:"Zoom per turn",    min:1.4,  max:40,  step:0.1,
+    fmt:function(v){ return v.toFixed(1) + "×"; } },
+  { g:"c-droste", k:"dSpin",    label:"Spin rate",        min:-0.6, max:0.6, step:0.005,
+    fmt:function(v){ return v.toFixed(3); } },
+
+  { g:"c-render", k:"quality",  label:"Iteration budget", min:0.3,  max:8,   step:0.05,
+    fmt:function(v){ return Math.round(v*100) + "%"; } },
+  { g:"c-render", k:"colScale", label:"Colour density",   min:0.15, max:4,   step:0.01,
+    fmt:function(v){ return v.toFixed(2); } },
+  { g:"c-render", k:"colShift", label:"Colour offset",    min:0,    max:1,   step:0.005,
+    fmt:function(v){ return v.toFixed(3); } }
+];
+CTRLS.forEach(function (c) {
+  var store = P;
+  var row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = '<div class="lab"><span>' + c.label + '</span><span class="val"></span></div>' +
+                  '<input type="range" min="'+c.min+'" max="'+c.max+'" step="'+c.step+'">';
+  var input = row.querySelector("input"), val = row.querySelector(".val");
+  input.value = store[c.k]; val.textContent = c.fmt(store[c.k]);
+  input.addEventListener("input", function () {
+    store[c.k] = parseFloat(input.value);
+    val.textContent = c.fmt(store[c.k]);
+  });
+  document.getElementById(c.g).appendChild(row);
+});
+
+
+var pbtns = [];
+PRESETS.forEach(function (p, i) {
+  var b = document.createElement("button");
+  b.className = "pbtn";
+  b.innerHTML = p.n + "<small>" + p.d + "</small>";
+  b.addEventListener("click", function () {
+    goTo(p); setDive(0); syncFab();
+    pbtns.forEach(function (x, j) { x.classList.toggle("on", j === i); });
+    if (IS_TOUCH) panelEl.classList.remove("open");
+  });
+  pbtns.push(b);
+  document.getElementById("presets").appendChild(b);
+});
+pbtns[0].classList.add("on");
+
+var bDive = document.getElementById("b-dive"), bOut = document.getElementById("b-out");
+function setDive(v) {
+  diving = v;
+  bDive.classList.toggle("on", v === 1);
+  bOut.classList.toggle("on", v === -1);
+  bDive.textContent = v === 1 ? "Diving…" : "Dive in";
+}
+bDive.addEventListener("click", function () { setDive(diving === 1 ? 0 : 1); syncFab(); });
+bOut .addEventListener("click", function () { setDive(diving === -1 ? 0 : -1); });
+document.getElementById("b-home").addEventListener("click", function () {
+  goTo(PRESETS[0]); setDive(0);
+  pbtns.forEach(function (x, j) { x.classList.toggle("on", j === 0); });
+});
+var bDro = document.getElementById("b-droste"), bSpin = document.getElementById("b-dspin");
+var DRO_NAMES = ["Off", "Spiral", "Tunnel"];
+var dSpinOn = true;
+function syncDroste() {
+  bDro.textContent = DRO_NAMES[droste];
+  bDro.classList.toggle("on", droste > 0);
+  bSpin.classList.toggle("on", dSpinOn);
+}
+bDro.addEventListener("click", function () { droste = (droste + 1) % 3; syncDroste(); });
+bSpin.addEventListener("click", function () { dSpinOn = !dSpinOn; syncDroste(); });
+
+var bSer = document.getElementById("b-series");
+bSer.addEventListener("click", function () {
+  useSeries = !useSeries;
+  bSer.classList.toggle("on", useSeries);
+  series.N = -1;
+});
+
+/* Supersampling can't correct a wrong sample, only dilute it — so more samples
+ * is the one lever that reliably reduces visible speckle. 9x is expensive but
+ * a deep zoom with series approximation can usually afford it. */
+var SS_STEPS = [1, 2], ssIdx = 0;
+var bSS = document.getElementById("b-ss");
+function syncSS() {
+  var n = SS_STEPS[ssIdx];
+  bSS.textContent = n === 1 ? "1x (fast)" : (n * n) + "x when still";
+  bSS.classList.toggle("on", n > 1);
+  superSample = n;
+}
+bSS.addEventListener("click", function () { ssIdx = (ssIdx + 1) % SS_STEPS.length; syncSS(); });
+
+/* ---- touch controls ---------------------------------------------------- */
+var fabDive = document.getElementById("fab-dive"),
+    fabSet  = document.getElementById("fab-set"),
+    fabOut  = document.getElementById("fab-out"),
+    panelEl = document.getElementById("panel");
+
+function syncFab() {
+  fabDive.textContent = diving === 1 ? "STOP" : "DIVE IN";
+  if (document.body) {
+    var c = document.body.className.replace(/\s*diving/g, "");
+    document.body.className = c + (diving === 1 ? " diving" : "");
+  }
+}
+fabDive.addEventListener("click", function () {
+  setDive(diving === 1 ? 0 : 1);
+  if (diving === 1) panelEl.classList.remove("open");
+  syncFab();
+});
+fabOut.addEventListener("click", function () { setDive(diving === -1 ? 0 : -1); syncFab(); });
+fabSet.addEventListener("click", function () { panelEl.classList.toggle("open"); });
+
+var bIns = document.getElementById("b-insets");
+bIns.addEventListener("click", function () {
+  showInsets = !showInsets; bIns.classList.toggle("on", showInsets); positionLabels();
+});
+document.getElementById("b-pal").addEventListener("click", function () { palette = (palette + 1) % 4; });
+document.getElementById("b-snap").addEventListener("click", function () {
+  renderAll();
+  var a = document.createElement("a");
+  a.download = "mandelbrot-" + magnification().toExponential(2) + ".png";
+  a.href = canvas.toDataURL("image/png"); a.click();
+});
+
+
+
+/* ═══════════════════════ HUD ══ */
+var hMag = document.getElementById("h-mag"),  hPhys = document.getElementById("h-phys"),
+    hIt  = document.getElementById("h-it"),   hRef  = document.getElementById("h-ref"),
+    hRt  = document.getElementById("h-reft"), hFps  = document.getElementById("h-fps"),
+    hBits= document.getElementById("h-bits"), hSkip = document.getElementById("h-skip"),
+    hSkipPc = document.getElementById("h-skippc");
+
+var LADDER = [
+  [1,"a coin"], [2,"a person"], [1e2,"a city block"], [1e4,"a small city"],
+  [1.274e7,"the Earth"], [3.844e8,"the Moon's orbit"], [1.496e11,"Earth to the Sun"],
+  [9.0e12,"Neptune's orbit"], [9.461e15,"one light year"],
+  [4.0e16,"the distance to Proxima Centauri"], [9.5e18,"a thousand light years"],
+  [1.0e21,"the Milky Way"], [2.4e22,"the Local Group"],
+  [8.8e26,"the observable universe"]
+];
+function physDesc(meters) {
+  if (!isFinite(meters)) return "beyond description";
+  if (meters < 0.4) return "smaller than this screen";
+  var s;
+  if (meters < 1e3) s = meters.toFixed(1) + " m";
+  else if (meters < 9.461e15) s = (meters/1e3).toExponential(2) + " km";
+  else s = (meters/9.461e15).toExponential(2) + " light years";
+  for (var i = LADDER.length - 1; i >= 0; i--)
+    if (meters >= LADDER[i][0]) return s + " — wider than " + LADDER[i][1];
+  return s;
+}
+
+var last = performance.now(), fps = 60, acc = 0;
+
+function tick(now) {
+  requestAnimationFrame(tick);
+  var dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  fps += ((dt > 0 ? 1/dt : 60) - fps) * 0.08;
+
+  if (droste > 0 && dSpinOn) dPhase += P.dSpin * dt;
+
+  if (diving !== 0) {
+    var ns = view.scale * Math.exp(-diving * P.diveRate * dt);
+    if (HOME.scale / ns > MAX_MAG) { view.scale = HOME.scale / MAX_MAG; setDive(0); syncFab(); }
+    else if (ns > HOME.scale * 4)  { view.scale = HOME.scale * 4;       setDive(0); syncFab(); }
+    else view.scale = ns;
+  }
+
+  renderAll();
+
+  acc += dt;
+  if (acc > 0.2) {
+    acc = 0;
+    var m = magnification();
+    hMag.textContent  = m < 1e4 ? m.toFixed(1) + "×" : m.toExponential(2) + "×";
+    hPhys.textContent = physDesc(0.45 / view.scale);
+    var itNow = currentIters();
+    var sk = useSeries && series.N > 0 ? series.N : 0;
+    hIt.textContent    = itNow.toLocaleString();
+    hSkip.textContent  = sk.toLocaleString();
+    hSkipPc.textContent = sk > 0 ? "(" + Math.round(100 * sk / itNow) + "% of the work)" : "";
+    hBits.textContent = FRAC.toString();
+    hRef.textContent  = ref.len.toLocaleString();
+    hRt.textContent   = ref.ms.toFixed(1);
+    hFps.textContent  = fps.toFixed(0);
+  }
+}
+
+if (IS_TOUCH) {
+  P.quality = 0.7;                 // phones have a fraction of the fill rate
+  ssIdx = 0;                       // 1 sample until the user asks for more
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  showInsets = false;
+  bIns.classList.remove("on");
+}
+syncSS();
+syncFab();
+
+resize();
+goTo(PRESETS[0]);
+syncDroste();
+requestAnimationFrame(tick);
+
+})();
+</script>
+</body>
+</html>
