@@ -147,15 +147,6 @@
   </div>
 
   <div class="grp">
-    <div class="grp-t">Droste warp</div>
-    <div class="btns" style="margin-bottom:9px">
-      <button id="b-droste">Off</button>
-      <button id="b-dspin" class="on">Spin</button>
-    </div>
-    <div id="c-droste"></div>
-  </div>
-
-  <div class="grp">
     <div class="grp-t">Render</div>
     <div id="c-render"></div>
     <div class="btns">
@@ -245,7 +236,11 @@ orbTex.minFilter = orbTex.magFilter = THREE.NearestFilter;
 orbTex.generateMipmaps = false;
 orbTex.needsUpdate = true;
 
-var ref = { cx: 0n, cy: 0n, len: 0, ms: 0, frac: FRAC };
+/* `len` is where the orbit actually escaped; `want` is how far we asked it to
+ * go. They are NOT the same — a reference centre outside the set escapes in a
+ * few dozen steps — and comparing len against the iteration target made this
+ * rebuild every frame while panning. */
+var ref = { cx: 0n, cy: 0n, len: 0, want: 0, ms: 0, frac: FRAC };
 
 function computeReference(cxFx, cyFx, maxIter) {
   var t0 = performance.now();
@@ -261,7 +256,7 @@ function computeReference(cxFx, cyFx, maxIter) {
     refZ[i * 2]    = dx; refZ[i * 2 + 1]    = dy;
     if (fxMul(zx, zx) + fxMul(zy, zy) > four) { i++; break; }
   }
-  ref.cx = cxFx; ref.cy = cyFx; ref.len = i - 1; ref.frac = FRAC;
+  ref.cx = cxFx; ref.cy = cyFx; ref.len = i - 1; ref.want = maxIter; ref.frac = FRAC;
   ref.ms = performance.now() - t0;
   orbTex.needsUpdate = true;
   series.N = -1;                                    // force a series rebuild
@@ -379,10 +374,6 @@ var FRAG = [
 "uniform float uSkipLogS;",
 "uniform float uSkipF;",
 "uniform vec2  uSA[10];",      // pre-scaled series coefficients A_1 … A_10
-"uniform float uDroste;",      // 0 off · 1 spiral · 2 tiled tunnel
-"uniform float uDTwist;",      // windings per radial period
-"uniform float uDLambda;",     // radial period (zoom factor per turn)
-"uniform float uDPhase;",
 
 "vec2 cmul(vec2 a, vec2 b){ return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }",
 "float rnd(float x){ return floor(x + 0.5); }",
@@ -401,19 +392,6 @@ var FRAG = [
 
 "vec3 shade(vec2 p){",
 
-/* Droste–Escher conformal map, in log-polar coordinates.
- * Shearing log(r) against theta turns concentric scaling into a spiral; the
- * tiled variant wraps log(r) into a single period, which forces the picture to
- * repeat every factor lambda inward — a periodicity the set does not actually
- * have, so the mismatch you see at the seam is the honest part.            */
-"  if (uMode == 0 && uDroste > 0.5) {",
-"    float r  = max(length(p), 1e-7);",
-"    float th = atan(p.y, p.x);",
-"    float lnL = log(max(uDLambda, 1.0001));",
-"    float lr = log(r) + uDTwist * th * lnL / 6.2831853 + uDPhase * lnL;",
-"    if (uDroste > 1.5) lr = mod(lr, lnL) - lnL;",
-"    p = vec2(cos(th), sin(th)) * exp(lr);",
-"  }",
 
 "  bool escaped = false;",
 "  float sn = 0.0;",
@@ -565,10 +543,6 @@ var uni = {
   uSkipLogS:    { value: 0.0 },
   uSkipF:       { value: 1.0 },
   uSA:          { value: (function(){ var a=[]; for(var i=0;i<10;i++) a.push(new THREE.Vector2(0,0)); return a; })() },
-  uDroste:      { value: 0.0 },
-  uDTwist:      { value: 1.0 },
-  uDLambda:     { value: 6.0 },
-  uDPhase:      { value: 0.0 }
 };
 
 var quad = new THREE.Mesh(
@@ -584,10 +558,8 @@ var HOME = { x: -0.6, y: 0.0, scale: 1.3 };
 var view = { cx: toFx(HOME.x), cy: toFx(HOME.y), scale: HOME.scale };
 var MAX_MAG = 1e290;                       // JS double floor on `scale`
 
-var P = { quality: 1.0, colScale: 1.0, colShift: 0.0, diveRate: 0.55,
-          dTwist: 1.0, dLambda: 6.0, dSpin: 0.08 };
+var P = { quality: 1.0, colScale: 1.0, colShift: 0.0, diveRate: 0.55 };
 var diving = 0, showInsets = true, palette = 0, needRef = true;
-var droste = 0, dPhase = 0;                     // 0 off · 1 spiral · 2 tunnel
 var useSeries = true, superSample = 1;
 /* Sub-pixel offsets per accumulation pass, in pixel units. */
 var JITTER = {
@@ -628,9 +600,11 @@ function refreshReferenceIfNeeded() {
   setFrac(neededFrac());
   var it = currentIters();
   var drift = Math.max(Math.abs(fxToNum(view.cx - ref.cx)), Math.abs(fxToNum(view.cy - ref.cy)));
-  if (needRef || ref.frac !== FRAC || drift > view.scale * 1.5 ||
-      ref.len < Math.min(it, ORB_MAX - 4) - 1) {
-    computeReference(view.cx, view.cy, it);
+  /* Every rebuild changes the rounding for every pixel, so marginal pixels flip
+   * and you see a flash. Rebuild only when genuinely needed, and overshoot the
+   * iteration target so a dive doesn't trip it again immediately. */
+  if (needRef || ref.frac !== FRAC || drift > view.scale * 1.5 || ref.want < it) {
+    computeReference(view.cx, view.cy, Math.min(Math.ceil(it * 1.6), ORB_MAX - 4));
     needRef = false;
   }
 }
@@ -723,8 +697,12 @@ function renderAll() {
    * stale one built at a smaller R. Rebuild on any meaningful scale change.  */
   if (useSeries) {
     var R = view.scale * (Math.hypot(W / H, 1) + Math.hypot(dcbx, dcby));
+    /* Same reasoning: each rebuild moves the entry point and flips marginal
+     * pixels. At 0.4 octaves a dive re-triggered this roughly once a second,
+     * which is exactly the flashing cadence. A stale series is conservative —
+     * it skips fewer iterations, never wrong ones — so rebuild far less often. */
     if (series.N < 0 || series.scale <= 0 ||
-        Math.abs(Math.log2(view.scale / series.scale)) > 0.4) {
+        Math.abs(Math.log2(view.scale / series.scale)) > 1.5) {
       buildSeries(view.scale, R);
     }
     uni.uSkipN.value    = series.N;
@@ -736,10 +714,6 @@ function renderAll() {
     uni.uSkipN.value = 0;
   }
 
-  uni.uDroste.value   = droste;
-  uni.uDTwist.value   = P.dTwist;
-  uni.uDLambda.value  = P.dLambda;
-  uni.uDPhase.value   = dPhase;
 
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, W, H);
@@ -875,13 +849,6 @@ window.addEventListener("keydown", function (e) {
 var CTRLS = [
   { g:"c-dive",   k:"diveRate", label:"Dive speed",       min:0.05, max:2.5, step:0.01,
     fmt:function(v){ return v.toFixed(2) + "×/s"; } },
-  { g:"c-droste", k:"dTwist",   label:"Windings",         min:-4,   max:4,   step:0.05,
-    fmt:function(v){ return v.toFixed(2) + (Math.abs(v-Math.round(v))<1e-6 ? " (tiles clean)" : ""); } },
-  { g:"c-droste", k:"dLambda",  label:"Zoom per turn",    min:1.4,  max:40,  step:0.1,
-    fmt:function(v){ return v.toFixed(1) + "×"; } },
-  { g:"c-droste", k:"dSpin",    label:"Spin rate",        min:-0.6, max:0.6, step:0.005,
-    fmt:function(v){ return v.toFixed(3); } },
-
   { g:"c-render", k:"quality",  label:"Iteration budget", min:0.3,  max:8,   step:0.05,
     fmt:function(v){ return Math.round(v*100) + "%"; } },
   { g:"c-render", k:"colScale", label:"Colour density",   min:0.15, max:4,   step:0.01,
@@ -933,16 +900,6 @@ document.getElementById("b-home").addEventListener("click", function () {
   goTo(PRESETS[0]); setDive(0);
   pbtns.forEach(function (x, j) { x.classList.toggle("on", j === 0); });
 });
-var bDro = document.getElementById("b-droste"), bSpin = document.getElementById("b-dspin");
-var DRO_NAMES = ["Off", "Spiral", "Tunnel"];
-var dSpinOn = true;
-function syncDroste() {
-  bDro.textContent = DRO_NAMES[droste];
-  bDro.classList.toggle("on", droste > 0);
-  bSpin.classList.toggle("on", dSpinOn);
-}
-bDro.addEventListener("click", function () { droste = (droste + 1) % 3; syncDroste(); });
-bSpin.addEventListener("click", function () { dSpinOn = !dSpinOn; syncDroste(); });
 
 var bSer = document.getElementById("b-series");
 bSer.addEventListener("click", function () {
@@ -1034,7 +991,6 @@ function tick(now) {
   last = now;
   fps += ((dt > 0 ? 1/dt : 60) - fps) * 0.08;
 
-  if (droste > 0 && dSpinOn) dPhase += P.dSpin * dt;
 
   if (diving !== 0) {
     var ns = view.scale * Math.exp(-diving * P.diveRate * dt);
@@ -1075,7 +1031,6 @@ syncFab();
 
 resize();
 goTo(PRESETS[0]);
-syncDroste();
 requestAnimationFrame(tick);
 
 })();
