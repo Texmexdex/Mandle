@@ -18,7 +18,6 @@
   #gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
   #gl.drag{cursor:grabbing}
 
-
   #panel{position:fixed;top:12px;right:12px;width:310px;max-height:calc(100% - 24px);
     overflow-y:auto;background:var(--panel);backdrop-filter:blur(14px);
     border:1px solid var(--line);border-radius:12px;padding:14px;font-size:11px;
@@ -106,7 +105,6 @@
   body.touch .row{margin-bottom:15px}
   body.touch .lab{font-size:12px}
 
-  /* while diving, get everything out of the way but leave a stop button */
   body.touch.diving #hud,
   body.touch.diving #fab-set,
   body.touch.diving #fab-out{opacity:0;pointer-events:none;transition:opacity .25s}
@@ -115,11 +113,10 @@
 <body>
 <canvas id="gl"></canvas>
 
-
 <div id="hud">
   <div><span class="k">magnification</span><b id="h-mag">1×</b></div>
   <div><span class="k">whole set would be</span><span class="sc" id="h-phys">screen-sized</span></div>
-  <div><span class="k">iterations</span><b id="h-it">0</b> · skipping <b id="h-skip">0</b> <span id="h-skippc"></span></div>
+  <div><span class="k">iterations</span><b id="h-it">0</b></div>
   <div><span class="k">precision</span><b id="h-bits">0</b> bits · ref <b id="h-ref">0</b> · <span id="h-reft">0</span> ms</div>
   <div><span class="k">fps</span><b id="h-fps">–</b></div>
 </div>
@@ -129,7 +126,7 @@
 
 <div id="panel">
   <h1>Deep Zoom</h1>
-  <p class="sub">Rescaled perturbation with an exact arbitrary-precision reference orbit. No fixed depth wall — go as deep as you're willing to wait for. Watch mini-brots arrive <b>distorted, differently at every location</b>.</p>
+  <p class="sub">Rescaled perturbation with an exact arbitrary-precision reference orbit. Direct per-iteration calculations.</p>
 
   <div class="grp" style="border-top:none;margin-top:0;padding-top:0">
     <div class="grp-t">Landmarks</div>
@@ -150,22 +147,12 @@
     <div class="grp-t">Render</div>
     <div id="c-render"></div>
     <div class="btns">
-      <button id="b-series" class="on">Series approx</button>
       <button id="b-ss" class="on">4x samples</button>
       <button id="b-insets" class="on">Insets</button>
       <button id="b-pal">Palette</button>
       <button id="b-snap">PNG</button>
     </div>
   </div>
-
-  <details open>
-    <summary>What to look for</summary>
-    <p><b>Seahorse vs Elephant vs Triple Spiral.</b> Same rule, same iteration, wildly different local decoration. If the set were self-similar these would converge to one picture. They don't — the local structure encodes your address.</p>
-    <p><b>Misiurewicz c = i.</b> Compare the main view to the Julia inset as you dive. They converge on each other. That's Tan Lei's 1990 theorem: at Misiurewicz points the Mandelbrot set is asymptotically similar to the corresponding <i>Julia</i> set — not to itself.</p>
-    <p><b>Feigenbaum point.</b> The one landmark that <i>is</i> asymptotically self-similar, repeating at ratio δ = 4.669…, the same constant that governs period-doubling in dripping taps and heart arrhythmias.</p>
-    <p><b>Speckle.</b> Near a chaotic boundary a pixel can sit on a knife edge where a one-bit difference flips its escape count by hundreds. WebGL has no doubles, and measured against exact ground truth, emulating them costs about 6× the shader time to remove only a third of the visible speckle — a bad trade. <b>4x samples</b> is the better one: it doesn't correct a bad sample, it dilutes it to quarter weight. Turn it off to see the difference. The real cure is per-pixel glitch detection against multiple reference orbits, which is what dedicated software does.</p>
-    <p><b>On "infinite".</b> There's no hard wall now — precision grows with depth automatically. But each decade down needs more iterations and more bits, so the cost climbs without bound. You can always go one more level. You can never go all the way. Raise <b>Iteration budget</b> when detail turns to mush; that's the signal you've outrun it.</p>
-  </details>
 </div>
 
 <div class="hint">drag = pan · scroll = zoom at cursor · <b>space</b> = dive · <b>H</b> = hide panel</div>
@@ -190,7 +177,7 @@ if (typeof THREE === "undefined") {
 
 /* ═══════════════ arbitrary-precision centre, precision follows depth ══════ */
 
-var FRAC = 128n;                       // fractional bits — grows with zoom
+var FRAC = 128n;
 var FXONE = 1n << FRAC;
 
 function toFx(x) {
@@ -199,9 +186,7 @@ function toFx(x) {
   for (var b = 1n; b <= FRAC; b++) { f *= 2; if (f >= 1) { acc |= (1n << (FRAC - b)); f -= 1; } }
   return neg ? -acc : acc;
 }
-/* 2^FRAC overflows a double once FRAC >= 1024, which would make Number(FXONE)
- * Infinity and silently discard the whole fractional part. Never materialise
- * it — take the top 64 bits and apply the exponent separately. */
+
 function fxToNum(a) {
   var neg = a < 0n; if (neg) a = -a;
   if (a === 0n) return 0;
@@ -211,8 +196,6 @@ function fxToNum(a) {
   return neg ? -v : v;
 }
 
-/* Landmark coordinates need far more digits than a double literal holds, so
- * they're stored as decimal strings and parsed straight into fixed point. */
 function toFxStr(s) {
   var neg = s.charAt(0) === "-";
   if (neg || s.charAt(0) === "+") s = s.slice(1);
@@ -227,20 +210,14 @@ function FX_FOUR() { return 4n << FRAC; }
 
 /* ══════════════════════════════════════════════════════ reference orbit ══ */
 
-var ORB_W = 1024, ORB_H = 32, ORB_MAX = ORB_W * ORB_H;     // 32,768 points
+var ORB_W = 1024, ORB_H = 32, ORB_MAX = ORB_W * ORB_H;
 var orbData = new Float32Array(ORB_MAX * 4);
-var refZ    = new Float64Array(ORB_MAX * 2);   // same orbit at full double precision,
-                                               // used by the series recurrence
 var orbTex = new THREE.DataTexture(orbData, ORB_W, ORB_H, THREE.RGBAFormat, THREE.FloatType);
 orbTex.minFilter = orbTex.magFilter = THREE.NearestFilter;
 orbTex.generateMipmaps = false;
 orbTex.needsUpdate = true;
 
-/* `len` is where the orbit actually escaped; `want` is how far we asked it to
- * go. They are NOT the same — a reference centre outside the set escapes in a
- * few dozen steps — and comparing len against the iteration target made this
- * rebuild every frame while panning. */
-var ref = { cx: 0n, cy: 0n, len: 0, want: 0, ms: 0, frac: FRAC };
+var ref = { cx: 0n, cy: 0n, len: 0, ms: 0, frac: FRAC };
 
 function computeReference(cxFx, cyFx, maxIter) {
   var t0 = performance.now();
@@ -253,99 +230,17 @@ function computeReference(cxFx, cyFx, maxIter) {
     zx = t;
     var dx = fxToNum(zx), dy = fxToNum(zy);
     orbData[i * 4] = dx; orbData[i * 4 + 1] = dy;
-    refZ[i * 2]    = dx; refZ[i * 2 + 1]    = dy;
     if (fxMul(zx, zx) + fxMul(zy, zy) > four) { i++; break; }
   }
-  ref.cx = cxFx; ref.cy = cyFx; ref.len = i - 1; ref.want = maxIter; ref.frac = FRAC;
+  ref.cx = cxFx; ref.cy = cyFx; ref.len = i - 1; ref.frac = FRAC;
   ref.ms = performance.now() - t0;
   orbTex.needsUpdate = true;
-  series.N = -1;                                    // force a series rebuild
-}
-
-/* ══════════════════════════════════════════════ series approximation ═════ */
-/* dz_n is a power series in dc:   dz_n = Σ A_k · dc^k ,  k = 1..K
- * Substituting into  dz' = 2·Z·dz + dz² + dc  and collecting powers gives
- *     A'_1 = 2·Z·A_1 + 1
- *     A'_k = 2·Z·A_k + Σ_{j=1}^{k-1} A_j · A_{k-j}        (a convolution)
- * The A_k depend only on the reference orbit, so they're built once on the CPU
- * and every pixel then jumps straight to iteration N instead of iterating to it. */
-
-var SK = 10;                                  // terms — 10 is the knee of the curve
-var SNAP = 16;                                // snapshot stride
-var series = { N: -1, logS: 0, f: 0, co: new Float32Array(SK * 2),
-               scale: 0, ms: 0, skipped: 0 };
-var saCur = new Float64Array(SK * 2), saTmp = new Float64Array(SK * 2);
-var saSnaps = [], saSnapN = [];
-
-function seriesStep(A, T, Zx, Zy) {
-  for (var k = 1; k <= SK; k++) {
-    var sx = 0, sy = 0;
-    for (var j = 1; j < k; j++) {
-      var ax = A[2*(j-1)], ay = A[2*(j-1)+1], bx = A[2*(k-j-1)], by = A[2*(k-j-1)+1];
-      sx += ax*bx - ay*by; sy += ax*by + ay*bx;
-    }
-    var px = A[2*(k-1)], py = A[2*(k-1)+1];
-    T[2*(k-1)]   = 2*(Zx*px - Zy*py) + sx + (k === 1 ? 1 : 0);
-    T[2*(k-1)+1] = 2*(Zx*py + Zy*px) + sy;
-  }
-  A.set(T);
-}
-
-function buildSeries(scale, R) {
-  var t0 = performance.now();
-  saCur.fill(0); saSnaps.length = 0; saSnapN.length = 0;
-  var best = 0, k, ok, t1, tK, RK = Math.pow(R, SK);
-  var lim = Math.min(ref.len - 1, ORB_MAX - 4);
-
-  for (var n = 0; n < lim; n++) {
-    seriesStep(saCur, saTmp, refZ[n*2], refZ[n*2+1]);
-    ok = true;
-    for (k = 0; k < SK * 2; k++) {
-      var v = saCur[k];
-      if (!isFinite(v) || Math.abs(v) > 1e290) { ok = false; break; }
-    }
-    if (!ok) break;
-    t1 = Math.hypot(saCur[0], saCur[1]) * R;
-    tK = Math.hypot(saCur[2*(SK-1)], saCur[2*(SK-1)+1]) * RK;
-    if (!(tK * 1e6 < t1)) break;                 // last term must be 1e6× below the first
-    best = n + 1;
-    if (best % SNAP === 0) { saSnaps.push(new Float64Array(saCur)); saSnapN.push(best); }
-  }
-
-  var margin = Math.max(0, Math.min(best - 8, Math.floor(best * 0.95)));
-  var pick = -1;
-  for (var s = saSnapN.length - 1; s >= 0; s--) if (saSnapN[s] <= margin) { pick = s; break; }
-
-  if (pick < 0) {
-    series.N = 0; series.f = 1; series.logS = Math.log2(scale);
-    series.co.fill(0); series.skipped = 0;
-  } else {
-    var Ac = saSnaps[pick];                       // not `A` — that's the audio state
-    var mA = Math.hypot(Ac[0], Ac[1]);
-    var E = mA > 0 ? Math.round(Math.log2(mA)) : 0;
-    var f = Math.pow(2, -E), sp = f;
-    for (k = 1; k <= SK; k++) {
-      series.co[2*(k-1)]   = Ac[2*(k-1)]   * sp;
-      series.co[2*(k-1)+1] = Ac[2*(k-1)+1] * sp;
-      sp *= scale;                                // A_k · scale^(k-1) · 2^-E
-    }
-    series.N = saSnapN[pick];
-    series.logS = Math.log2(scale) + E;
-    series.f = E > 100 ? 0 : f;
-    series.skipped = series.N;
-  }
-  series.scale = scale;
-  series.ms = performance.now() - t0;
 }
 
 /* ═══════════════════════════════════════════════════════════════ shader ══ */
 
 var VERT = "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy,0.0,1.0); }";
 
-/* Rescaled perturbation.  Write dz = S·dzs and dc = S·dcs with S = 2^logS.
- * The iteration becomes   dzs' = 2·Z·dzs + S·dzs² + dcs
- * and dzs is renormalised toward 1 each step, with logS absorbing the range.
- * That decouples zoom depth from the float32 exponent range entirely.       */
 var FRAG = [
 "#define MAXLOOP 32768",
 "#define FLOOR -110.0",
@@ -354,11 +249,11 @@ var FRAG = [
 "uniform sampler2D uOrbit;",
 "uniform vec2  uOrbitSize;",
 "uniform float uOrbitLen;",
-"uniform vec2  uDcsBase;",     // (view centre − reference centre) / scale
-"uniform float uLogS0;",       // log2(scale)
+"uniform vec2  uDcsBase;",
+"uniform float uLogS0;",
 "uniform float uAspect;",
 "uniform float uMaxIter;",
-"uniform int   uMode;",        // 0 rescaled M   1 julia   2 plain M
+"uniform int   uMode;",
 "uniform vec2  uPlainCenter;",
 "uniform float uPlainScale;",
 "uniform vec2  uJuliaC;",
@@ -367,13 +262,9 @@ var FRAG = [
 "uniform float uMarkerOn;",
 "uniform vec2  uMarker;",
 "uniform float uMarkerR;",
-"uniform vec2  uJitter;",      // sub-pixel offset for this accumulation pass
-"uniform float uWeight;",      // 1/N, so N additive passes average
-"uniform float uPixel;",       // one pixel, in p units
-"uniform float uSkipN;",       // series approximation entry iteration (0 = disabled)
-"uniform float uSkipLogS;",
-"uniform float uSkipF;",
-"uniform vec2  uSA[10];",      // pre-scaled series coefficients A_1 … A_10
+"uniform vec2  uJitter;",
+"uniform float uWeight;",
+"uniform float uPixel;",
 
 "vec2 cmul(vec2 a, vec2 b){ return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }",
 "float rnd(float x){ return floor(x + 0.5); }",
@@ -391,8 +282,6 @@ var FRAG = [
 "}",
 
 "vec3 shade(vec2 p){",
-
-
 "  bool escaped = false;",
 "  float sn = 0.0;",
 "  int iters = int(uMaxIter);",
@@ -415,29 +304,12 @@ var FRAG = [
 "      if (r2 > 1.0e8){ escaped=true; sn = float(k)+1.0-log(log(sqrt(r2))/log(1.0e4))/log(2.0); break; }",
 "    }",
 "  } else {",
-"    vec2 dcs = uDcsBase + p;",           // order 1 by construction
-"    vec2 dzs; float logS, m, n;",
-"    if (uSkipN > 0.5) {",
-/* Horner:  dz = dc·(A1 + dc·(A2 + dc·(A3 + …)))  — literal indices so this is
- * a constant-index expression under GLSL ES 1.00 on every driver.          */
-"      vec2 r = uSA[9];",
-"      r = cmul(r,dcs) + uSA[8];",
-"      r = cmul(r,dcs) + uSA[7];",
-"      r = cmul(r,dcs) + uSA[6];",
-"      r = cmul(r,dcs) + uSA[5];",
-"      r = cmul(r,dcs) + uSA[4];",
-"      r = cmul(r,dcs) + uSA[3];",
-"      r = cmul(r,dcs) + uSA[2];",
-"      r = cmul(r,dcs) + uSA[1];",
-"      r = cmul(r,dcs) + uSA[0];",
-"      dzs  = cmul(r, dcs);",
-"      m    = uSkipN;",
-"      n    = uSkipN;",
-"      logS = uSkipLogS;",
-"      dcs *= uSkipF;",                   // dc lives in units of S, which just changed
-"    } else {",
-"      dzs = vec2(0.0); m = 0.0; n = 0.0; logS = uLogS0;",
-"    }",
+"    vec2 dcs = uDcsBase + p;",
+"    vec2 dzs = vec2(0.0);",
+"    float logS = uLogS0;",
+"    float m = 0.0;",
+"    float n = 0.0;",
+
 "    for (int k = 0; k < MAXLOOP; k++){",
 "      if (n >= uMaxIter) break;",
 "      float q = (logS < FLOOR) ? 0.0 : exp2(logS);",
@@ -445,7 +317,7 @@ var FRAG = [
 "      dzs = 2.0*cmul(Z,dzs) + (q*cmul(dzs,dzs) + dcs);",
 "      m += 1.0; n += 1.0;",
 
-"      float mg = dot(dzs,dzs);",         // renormalise dzs toward 1
+"      float mg = dot(dzs,dzs);",
 "      if (mg > 1.0e12 || (mg < 1.0e-12 && mg > 0.0)) {",
 "        float sh = rnd(0.5*log2(mg));",
 "        float f = exp2(-sh);",
@@ -457,7 +329,7 @@ var FRAG = [
 "      vec2 z = orbitAt(m) + dtrue;",
 "      float r2 = dot(z,z);",
 "      if (r2 > 1.0e8){ escaped=true; sn = n+1.0-log(log(sqrt(r2))/log(1.0e4))/log(2.0); break; }",
-"      if (r2 < dot(dtrue,dtrue) || m >= uOrbitLen - 1.0) {",   // rebase
+"      if (r2 < dot(dtrue,dtrue) || m >= uOrbitLen - 1.0) {",
 "        float az = max(abs(z.x), abs(z.y));",
 "        float k2 = (az > 0.0) ? rnd(log2(az)) : 0.0;",
 "        float d  = logS - k2;",
@@ -473,17 +345,9 @@ var FRAG = [
 "  return pal(sqrt(max(sn,0.0)) * uColScale * 0.06 + uColShift);",
 "}",
 
-/* Residual wrong pixels are chaotic-boundary sensitivity, not a fixable bug —
- * see the note in the panel. Averaging four sub-samples doesn't correct them,
- * but it drops an isolated bad sample to a quarter weight, which is the
- * difference between a bright speckle and something you don't notice.       */
 "void main(){",
 "  vec2 p = (vUv - 0.5) * 2.0;",
 "  p.x *= uAspect;",
-/* Exactly ONE call to shade(). Calling it N times here makes the compiler
- * inline N copies of a 32768-iteration loop, which destroys occupancy — that
- * is what bogged the card. Supersampling is done with N cheap draw calls and
- * additive blending instead, so the shader stays one copy.                  */
 "  vec3 col = shade(p + uJitter * uPixel) * uWeight;",
 "  if (uMarkerOn > 0.5) {",
 "    vec2 wp = uPlainCenter + p * uPlainScale;",
@@ -495,8 +359,6 @@ var FRAG = [
 
 /* ═════════════════════════════════════════════════════════════ renderer ══ */
 
-/* Touch-first layout when the primary input is a finger. Screen width alone
- * misfires on small laptop windows and on tablets held in landscape. */
 var IS_TOUCH = (function () {
   try {
     var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
@@ -538,11 +400,7 @@ var uni = {
   uMarkerR:     { value: 0.07 },
   uJitter:      { value: new THREE.Vector2(0, 0) },
   uWeight:      { value: 1.0 },
-  uPixel:       { value: 0.002 },
-  uSkipN:       { value: 0.0 },
-  uSkipLogS:    { value: 0.0 },
-  uSkipF:       { value: 1.0 },
-  uSA:          { value: (function(){ var a=[]; for(var i=0;i<10;i++) a.push(new THREE.Vector2(0,0)); return a; })() },
+  uPixel:       { value: 0.002 }
 };
 
 var quad = new THREE.Mesh(
@@ -556,12 +414,12 @@ scene.add(quad);
 
 var HOME = { x: -0.6, y: 0.0, scale: 1.3 };
 var view = { cx: toFx(HOME.x), cy: toFx(HOME.y), scale: HOME.scale };
-var MAX_MAG = 1e290;                       // JS double floor on `scale`
+var MAX_MAG = 1e290;
 
 var P = { quality: 1.0, colScale: 1.0, colShift: 0.0, diveRate: 0.55 };
 var diving = 0, showInsets = true, palette = 0, needRef = true;
-var useSeries = true, superSample = 1;
-/* Sub-pixel offsets per accumulation pass, in pixel units. */
+var superSample = 1;
+
 var JITTER = {
   1: [0, 0],
   2: [-0.25,-0.25,  0.25,-0.25, -0.25, 0.25,  0.25, 0.25],
@@ -569,7 +427,6 @@ var JITTER = {
       -0.333, 0,     0, 0,     0.333, 0,
       -0.333, 0.333, 0, 0.333, 0.333, 0.333]
 };
-
 
 function magnification() { return HOME.scale / view.scale; }
 
@@ -579,15 +436,12 @@ function currentIters() {
   return Math.max(80, Math.min(ORB_MAX - 4, Math.round(it)));
 }
 
-/* precision tracks depth: enough bits for the scale, plus headroom */
-/* Floor of 256 bits (~77 decimal digits) so a 52-digit landmark survives being
- * loaded at a shallow scale. And FRAC only ever grows: shrinking it would
- * discard digits you'd need again on the way back down. */
 function neededFrac() {
   var bits = 96 + Math.ceil(Math.log2(1 / Math.max(view.scale, 1e-300)));
   var want = BigInt(Math.max(256, Math.min(4096, Math.ceil(bits / 64) * 64)));
   return want > FRAC ? want : FRAC;
 }
+
 function setFrac(nf) {
   if (nf <= FRAC) return;
   view.cx <<= (nf - FRAC);
@@ -600,21 +454,15 @@ function refreshReferenceIfNeeded() {
   setFrac(neededFrac());
   var it = currentIters();
   var drift = Math.max(Math.abs(fxToNum(view.cx - ref.cx)), Math.abs(fxToNum(view.cy - ref.cy)));
-  /* Every rebuild changes the rounding for every pixel, so marginal pixels flip
-   * and you see a flash. Rebuild only when genuinely needed, and overshoot the
-   * iteration target so a dive doesn't trip it again immediately. */
-  if (needRef || ref.frac !== FRAC || drift > view.scale * 1.5 || ref.want < it) {
-    computeReference(view.cx, view.cy, Math.min(Math.ceil(it * 1.6), ORB_MAX - 4));
+  if (needRef || ref.frac !== FRAC || drift > view.scale * 1.5 ||
+      ref.len < Math.min(it, ORB_MAX - 4) - 1) {
+    computeReference(view.cx, view.cy, it);
     needRef = false;
   }
 }
 
 /* ══════════════════════════════════════════════════════════════ presets ══ */
 
-/* Coordinates carrying only 6–7 digits run out at about 1e-7 of zoom: the
- * structure slides off screen and you're left staring at flat colour. These
- * were re-derived by hill-climbing each landmark onto the set boundary at
- * 1024-bit precision, then verified to still show detail at 1e-40.          */
 var PRESETS = [
   { n:"Home",            d:"the whole object",                       x:"-0.6", y:"0", s:1.3 },
   { n:"Seahorse Valley", d:"spirals wrapped in seahorse tails",
@@ -648,6 +496,7 @@ var PRESETS = [
   { n:"Period-3 root",   d:"c = −⅛ + 0.649519i · exact bulb junction",
     x:"-0.125", y:"0.6495190528383290", s:1.2e-2 }
 ];
+
 function goTo(p) {
   view.scale = p.s;
   setFrac(neededFrac());
@@ -669,6 +518,7 @@ function insetRects() {
   var w = Math.round(Math.min(230, W * 0.22)), h = Math.round(w * 0.75), pad = 12;
   return [ { x: W-w-pad, y: pad, w: w, h: h }, { x: W-w-pad, y: pad+h+8, w: w, h: h } ];
 }
+
 function positionLabels() {
   var r = insetRects();
   var a = document.getElementById("lab-a"), b = document.getElementById("lab-b");
@@ -691,40 +541,15 @@ function renderAll() {
   uni.uColShift.value = P.colShift;
   uni.uPalette.value  = palette;
   uni.uMarkerOn.value = 0;
-  /* Series validity depends on the corner radius R, which shrinks as you dive.
-   * A series built at a LARGER R is always conservative (it skips fewer
-   * iterations than it could), so a slightly stale one is safe — but never a
-   * stale one built at a smaller R. Rebuild on any meaningful scale change.  */
-  if (useSeries) {
-    var R = view.scale * (Math.hypot(W / H, 1) + Math.hypot(dcbx, dcby));
-    /* Same reasoning: each rebuild moves the entry point and flips marginal
-     * pixels. At 0.4 octaves a dive re-triggered this roughly once a second,
-     * which is exactly the flashing cadence. A stale series is conservative —
-     * it skips fewer iterations, never wrong ones — so rebuild far less often. */
-    if (series.N < 0 || series.scale <= 0 ||
-        Math.abs(Math.log2(view.scale / series.scale)) > 1.5) {
-      buildSeries(view.scale, R);
-    }
-    uni.uSkipN.value    = series.N;
-    uni.uSkipLogS.value = series.logS;
-    uni.uSkipF.value    = series.f;
-    for (var si = 0; si < SK; si++)
-      uni.uSA.value[si].set(series.co[si*2], series.co[si*2+1]);
-  } else {
-    uni.uSkipN.value = 0;
-  }
-
 
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, W, H);
   uni.uMode.value    = 0;
   uni.uAspect.value  = W / H;
-  uni.uPixel.value   = 2 / H;                 // p spans [-1,1] vertically over H px
+  uni.uPixel.value   = 2 / H;
   uni.uLogS0.value   = Math.log2(view.scale);
   uni.uDcsBase.value.set(dcbx, dcby);
 
-  /* Only supersample when the view is actually still. While diving or dragging
-   * the extra passes cost real milliseconds and buy nothing you can perceive. */
   var moving = (diving !== 0) || dragging;
   var axis = moving ? 1 : superSample;
   var J = JITTER[axis] || JITTER[1];
@@ -805,7 +630,7 @@ canvas.addEventListener("pointermove", function (e) {
   pointers[e.pointerId].y = e.clientY;
   var p = ptList();
 
-  if (p.length >= 2) {                                  // pinch to zoom
+  if (p.length >= 2) {
     var d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
     if (pinchDist > 0 && d > 0) {
       zoomAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2, pinchDist / d);
@@ -871,7 +696,6 @@ CTRLS.forEach(function (c) {
   document.getElementById(c.g).appendChild(row);
 });
 
-
 var pbtns = [];
 PRESETS.forEach(function (p, i) {
   var b = document.createElement("button");
@@ -901,16 +725,6 @@ document.getElementById("b-home").addEventListener("click", function () {
   pbtns.forEach(function (x, j) { x.classList.toggle("on", j === 0); });
 });
 
-var bSer = document.getElementById("b-series");
-bSer.addEventListener("click", function () {
-  useSeries = !useSeries;
-  bSer.classList.toggle("on", useSeries);
-  series.N = -1;
-});
-
-/* Supersampling can't correct a wrong sample, only dilute it — so more samples
- * is the one lever that reliably reduces visible speckle. 9x is expensive but
- * a deep zoom with series approximation can usually afford it. */
 var SS_STEPS = [1, 2], ssIdx = 0;
 var bSS = document.getElementById("b-ss");
 function syncSS() {
@@ -954,14 +768,11 @@ document.getElementById("b-snap").addEventListener("click", function () {
   a.href = canvas.toDataURL("image/png"); a.click();
 });
 
-
-
 /* ═══════════════════════ HUD ══ */
 var hMag = document.getElementById("h-mag"),  hPhys = document.getElementById("h-phys"),
     hIt  = document.getElementById("h-it"),   hRef  = document.getElementById("h-ref"),
     hRt  = document.getElementById("h-reft"), hFps  = document.getElementById("h-fps"),
-    hBits= document.getElementById("h-bits"), hSkip = document.getElementById("h-skip"),
-    hSkipPc = document.getElementById("h-skippc");
+    hBits= document.getElementById("h-bits");
 
 var LADDER = [
   [1,"a coin"], [2,"a person"], [1e2,"a city block"], [1e4,"a small city"],
@@ -991,7 +802,6 @@ function tick(now) {
   last = now;
   fps += ((dt > 0 ? 1/dt : 60) - fps) * 0.08;
 
-
   if (diving !== 0) {
     var ns = view.scale * Math.exp(-diving * P.diveRate * dt);
     if (HOME.scale / ns > MAX_MAG) { view.scale = HOME.scale / MAX_MAG; setDive(0); syncFab(); }
@@ -1008,10 +818,7 @@ function tick(now) {
     hMag.textContent  = m < 1e4 ? m.toFixed(1) + "×" : m.toExponential(2) + "×";
     hPhys.textContent = physDesc(0.45 / view.scale);
     var itNow = currentIters();
-    var sk = useSeries && series.N > 0 ? series.N : 0;
-    hIt.textContent    = itNow.toLocaleString();
-    hSkip.textContent  = sk.toLocaleString();
-    hSkipPc.textContent = sk > 0 ? "(" + Math.round(100 * sk / itNow) + "% of the work)" : "";
+    hIt.textContent   = itNow.toLocaleString();
     hBits.textContent = FRAC.toString();
     hRef.textContent  = ref.len.toLocaleString();
     hRt.textContent   = ref.ms.toFixed(1);
@@ -1020,8 +827,8 @@ function tick(now) {
 }
 
 if (IS_TOUCH) {
-  P.quality = 0.7;                 // phones have a fraction of the fill rate
-  ssIdx = 0;                       // 1 sample until the user asks for more
+  P.quality = 0.7;
+  ssIdx = 0;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   showInsets = false;
   bIns.classList.remove("on");
